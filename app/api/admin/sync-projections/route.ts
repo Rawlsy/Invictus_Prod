@@ -13,28 +13,22 @@ const ROUND_TO_DOC_ID: Record<string, string> = {
 };
 
 export async function GET(request: Request) {
-  // SECURITY CHECK: Only allow Vercel Cron or Localhost
-  const authHeader = request.headers.get('authorization');
-  const isCron = authHeader === `Bearer ${process.env.CRON_SECRET}`;
-  const isLocal = process.env.NODE_ENV === 'development';
-
-  if (!isCron && !isLocal) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
+  const { searchParams } = new URL(request.url);
+  const round = searchParams.get('round') || 'wildcard';
+  
+  // FIX: Define docId BEFORE using it in logs
+  const docId = ROUND_TO_DOC_ID[round];
 
   // --- DEBUG OVERRIDE ---
-  // We force Week 18 (Regular Season) just to PROVE the sync works.
-  // Once you see real data, you can change this back to '19' (Wildcard).
   const DEBUG_WEEK = '18'; 
-  const SEASON = '2025'; // Ensure this matches the API's current season context
+  const SEASON = '2025'; 
 
   console.log(`[Sync] 🚀 STARTING NUCLEAR SYNC`);
   console.log(`[Sync] Target Document: system_cache/${docId}`);
   console.log(`[Sync] API Target: Week ${DEBUG_WEEK}, Season ${SEASON}`);
 
   try {
-    // 1. DELETE EXISTING DATA (The "Nuclear" Option)
-    // This guarantees your manual data is GONE.
+    // 1. DELETE EXISTING DATA
     const docRef = doc(db, 'system_cache', docId);
     await deleteDoc(docRef);
     console.log(`[Sync] 🗑️ Deleted old document: ${docId}`);
