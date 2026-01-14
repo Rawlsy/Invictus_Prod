@@ -36,8 +36,8 @@ export default function LoginPage() {
       }
       
       // --- THE CRITICAL FIX ---
-      // Redirect to the Dashboard, NOT the home page
-      router.push('/dashboard'); 
+      // Redirect to the hub, NOT the home page
+      router.push('/hub'); 
       
     } catch (err: any) {
       setError(err.message);
