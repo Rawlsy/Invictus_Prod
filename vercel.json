@@ -1,0 +1,12 @@
+{
+  "crons": [
+    {
+      "path": "/api/admin/sync-projections?round=wildcard",
+      "schedule": "0 12 * * *"
+    },
+    {
+      "path": "/api/admin/sync-scores?round=wildcard",
+      "schedule": "0 13 * * *"
+    }
+  ]
+}
