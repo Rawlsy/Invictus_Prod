@@ -14,10 +14,16 @@ export async function GET(request: Request) {
     const players = await getNFLPlayers(round);
 
     // LOG PROJECTION SAMPLE
-    // This will tell us immediately if the library found data or not
-    const samplePlayer = players.find(p => p.projection > 0);
+    // FIX: Added "(p: any)" to fix Build Error
+    // FIX: Checking 'fantasyPoints' OR 'projection' to match your data structure
+    const samplePlayer = players.find((p: any) => (p.fantasyPoints || p.projection) > 0);
+    
     if (samplePlayer) {
-        console.log(`✅ SUCCESS: Found player with projection > 0: ${samplePlayer.name} (${samplePlayer.projection})`);
+        // @ts-ignore
+        const pts = samplePlayer.fantasyPoints || samplePlayer.projection;
+        // @ts-ignore
+        const name = samplePlayer.longName || samplePlayer.name;
+        console.log(`✅ SUCCESS: Found player with projection > 0: ${name} (${pts})`);
     } else {
         console.log(`❌ FAILURE: All ${players.length} players have 0 projection.`);
     }
@@ -31,7 +37,7 @@ export async function GET(request: Request) {
     ];
 
     return NextResponse.json({ players, games });
-    
+     
   } catch (error) {
     console.error("🔥 API ROUTE CRASHED:", error);
     return NextResponse.json({ players: [], games: [] }, { status: 500 });
