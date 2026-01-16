@@ -1,455 +1,316 @@
 ﻿'use client';
 
-import React, { useState, useEffect } from 'react';
-import { useRouter, useParams } from 'next/navigation';
-import { onAuthStateChanged, User } from 'firebase/auth';
-import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
-import { auth, db } from '@/lib/firebase';
-// Ensure this import matches your library export
-import { NFLPlayer } from '@/lib/nfl-api'; 
+import { useState, useEffect } from 'react';
+import { useParams } from 'next/navigation';
+import { doc, getDoc } from 'firebase/firestore'; 
+import { db } from '@/lib/firebase';
 
-// --- CONFIG ---
-const ROUNDS = [
-  { id: 'wildcard', label: 'Wildcard' },
-  { id: 'divisional', label: 'Divisional' },
-  { id: 'conference', label: 'Conf. Champ' },
-  { id: 'superbowl', label: 'Super Bowl' }
-];
-
-const STANDARD_SLOTS = [
-  { id: 'qb1', pos: 'QB', label: 'QB' },
-  { id: 'rb1', pos: 'RB', label: 'RB' },
-  { id: 'rb2', pos: 'RB', label: 'RB' },
-  { id: 'wr1', pos: 'WR', label: 'WR' },
-  { id: 'wr2', pos: 'WR', label: 'WR' },
-  { id: 'te1', pos: 'TE', label: 'TE' },
-  { id: 'flex1', pos: 'FLEX', label: 'FLEX' },
-  { id: 'k1', pos: 'K', label: 'K' },
-  { id: 'def1', pos: 'DEF', label: 'DEF' }
-];
-
-const CUSTOM_SLOTS = [
-  { id: 'qb1', pos: 'QB', label: 'QB' },
-  { id: 'rb1', pos: 'RB', label: 'RB' },
-  { id: 'rb2', pos: 'RB', label: 'RB' },
-  { id: 'wr1', pos: 'WR', label: 'WR' },
-  { id: 'wr2', pos: 'WR', label: 'WR' },
-  { id: 'wr3', pos: 'WR', label: 'WR' },
-  { id: 'te1', pos: 'TE', label: 'TE' },
-  { id: 'sflex1', pos: 'SUPERFLEX', label: 'OP' },
-];
-
-// --- COMPONENT: GAMES BAR ---
-interface GameInfo {
-  id: string;
-  home: string;
-  away: string;
-  date: string;
-  time: string;
-}
-
-const GamesBar = ({ games }: { games: GameInfo[] }) => {
-  if (!games || games.length === 0) return null;
-
-  const formatDate = (dateStr: string) => {
-    if (!dateStr || dateStr.length !== 8) return dateStr;
-    const month = dateStr.substring(4, 6);
-    const day = dateStr.substring(6, 8);
-    return `${parseInt(month)}/${parseInt(day)}`;
-  };
-
-  return (
-    <div className="mb-6 overflow-x-auto pb-2">
-      <div className="flex space-x-3 min-w-max">
-        {games.map((game) => (
-          <div key={game.id} className="bg-white border border-gray-200 rounded-lg p-3 w-40 flex flex-col items-center shadow-sm">
-            <div className="text-[10px] text-gray-500 font-bold uppercase tracking-wider mb-1">
-              {formatDate(game.date)} • {game.time}
-            </div>
-            <div className="flex items-center justify-between w-full px-2">
-              <span className="font-bold text-gray-800 text-lg">{game.away}</span>
-              <span className="text-gray-400 text-xs">@</span>
-              <span className="font-bold text-gray-800 text-lg">{game.home}</span>
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
+// --- CONFIGURATION ---
+const ROUND_SCHEDULE = {
+  wildcard:   new Date('2026-01-10T16:30:00-05:00'), 
+  divisional: new Date('2026-01-17T16:30:00-05:00'), 
+  conference: new Date('2026-01-25T15:00:00-05:00'), 
+  superbowl:  new Date('2026-02-08T18:30:00-05:00'), 
 };
 
-// --- COMPONENT: PLAYER SELECTOR (ROBUST VERSION) ---
-const PlayerSelector = ({ 
-  isOpen, 
-  onClose, 
-  onSelect, 
-  positionNeeded, 
-  availablePlayers 
-}: { 
-  isOpen: boolean; 
-  onClose: () => void; 
-  onSelect: (player: NFLPlayer) => void;
-  positionNeeded: string;
-  availablePlayers: NFLPlayer[];
-}) => {
-  if (!isOpen) return null;
+const POSITIONS = [
+  { id: 'QB', name: 'Quarterback' },
+  { id: 'RB1', label: 'RB', name: 'Running Back' },
+  { id: 'RB2', label: 'RB', name: 'Running Back' },
+  { id: 'WR1', label: 'WR', name: 'Wide Receiver' },
+  { id: 'WR2', label: 'WR', name: 'Wide Receiver' },
+  { id: 'TE', name: 'Tight End' },
+  { id: 'FLEX', name: 'Flex' },
+  { id: 'K', name: 'Kicker' },
+  { id: 'DEF', name: 'Defense' }
+];
 
-  const filteredPlayers = availablePlayers.filter(p => {
-    // Robust Check: Handle 'position' OR 'pos', and normalize case
-    // @ts-ignore
-    const rawPos = p.position || p.pos || ''; 
-    const playerPos = rawPos.toUpperCase();
-    const target = positionNeeded.toUpperCase();
-
-    // Debugging specific misses if needed
-    // if (target === 'QB' && playerPos !== 'QB') console.log('Skipping', p.name, playerPos);
-
-    if (target === 'FLEX') return ['RB', 'WR', 'TE'].includes(playerPos);
-    if (target === 'SUPERFLEX' || target === 'OP') return ['QB', 'RB', 'WR', 'TE'].includes(playerPos);
-    
-    return playerPos === target;
-  });
-
-  // Sort by Projection (High to Low)
-  const sortedPlayers = filteredPlayers.sort((a, b) => (b.projection || 0) - (a.projection || 0));
-
-  return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col max-h-[80vh]">
-        
-        {/* Header */}
-        <div className="bg-gray-50 px-6 py-4 border-b border-gray-100 flex justify-between items-center">
-          <div>
-            <h3 className="font-bold text-gray-800">Select {positionNeeded}</h3>
-            <p className="text-xs text-gray-500">{sortedPlayers.length} available</p>
-          </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 font-bold text-xl">✕</button>
-        </div>
-
-        {/* List */}
-        <div className="overflow-y-auto flex-1 p-4 space-y-2">
-          {sortedPlayers.length === 0 ? (
-            <div className="text-center py-10 text-gray-400 px-4">
-              <p className="font-bold">No players found.</p>
-              <p className="text-xs mt-2 text-gray-400">
-                 Debug: Loaded {availablePlayers.length} total players. 
-                 Looking for "{positionNeeded}".
-              </p>
-            </div>
-          ) : (
-            sortedPlayers.map(player => (
-              <div 
-                key={player.id}
-                onClick={() => onSelect(player)}
-                className="flex justify-between items-center p-3 border border-gray-200 rounded-lg hover:bg-blue-50 hover:border-blue-300 cursor-pointer transition group"
-              >
-                <div className="flex items-center space-x-3">
-                  <span className="bg-gray-100 text-gray-600 text-xs font-bold px-2 py-1 rounded w-12 text-center">
-                    {player.position || 'N/A'}
-                  </span>
-                  <div>
-                    <p className="font-bold text-gray-900 text-sm">{player.name}</p>
-                    <div className="flex items-center gap-2 mt-0.5">
-                      <p className="text-xs text-gray-500">{player.team} {player.opponent ? `vs ${player.opponent}` : ''}</p>
-                      <span className="bg-green-50 text-green-700 text-[10px] font-bold px-1.5 py-0.5 rounded border border-green-100">
-                        Proj: {player.projection?.toFixed(1) || '0.0'}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-                <div className="text-right flex items-center space-x-3">
-                  <button className="h-8 w-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-bold group-hover:bg-blue-600 group-hover:text-white transition">+</button>
-                </div>
-              </div>
-            ))
-          )}
-        </div>
-      </div>
-    </div>
-  );
-};
-
-// --- COMPONENT: SELECTIONS TAB ---
-const SelectionsTab = ({ league, user }: { league: any, user: User }) => {
-  const [activeRound, setActiveRound] = useState('wildcard');
-  const [unlockedRounds, setUnlockedRounds] = useState<string[]>(['wildcard']);
-  
-  const [lineup, setLineup] = useState<Record<string, NFLPlayer | null>>({});
-  const [allPlayers, setAllPlayers] = useState<NFLPlayer[]>([]);
-  const [games, setGames] = useState<GameInfo[]>([]);
-  const [loadingData, setLoadingData] = useState(false);
-  const [selectingSlot, setSelectingSlot] = useState<{id: string, pos: string} | null>(null);
-  const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'error'>('saved');
-
-  // Load Round Data
-  useEffect(() => {
-    const fetchRoundData = async () => {
-      setLoadingData(true);
-      try {
-        // 1. Fetch Players from API
-        const res = await fetch(`/api/nfl?round=${activeRound}`);
-        const data = await res.json();
-        
-        console.log(`[SelectionsTab] API Response for ${activeRound}:`, data);
-        setAllPlayers(data.players || []);
-        setGames(data.games || []);
-
-        // 2. Fetch User Lineup from Firestore
-        const lineupRef = doc(db, 'leagues', league.id, 'lineups', `${user.uid}_${activeRound}`);
-        const lineupSnap = await getDoc(lineupRef);
-        
-        if (lineupSnap.exists()) {
-          setLineup(lineupSnap.data().roster || {});
-        } else {
-          setLineup({});
-        }
-      } catch (error) {
-        console.error("Error loading round data:", error);
-      } finally {
-        setLoadingData(false);
-      }
-    };
-    fetchRoundData();
-  }, [activeRound, league.id, user.uid]);
-
-  // Save Logic
-  const saveLineupToFirestore = async (newLineup: Record<string, NFLPlayer | null>) => {
-    setSaveStatus('saving');
-    try {
-      const lineupRef = doc(db, 'leagues', league.id, 'lineups', `${user.uid}_${activeRound}`);
-      await setDoc(lineupRef, {
-        userId: user.uid,
-        userName: user.displayName || 'Unknown',
-        round: activeRound,
-        roster: newLineup,
-        updatedAt: serverTimestamp()
-      });
-      setSaveStatus('saved');
-    } catch (error) {
-      console.error("Auto-save failed:", error);
-      setSaveStatus('error');
-    }
-  };
-
-  const rosterSlots = league.type === 'custom' ? CUSTOM_SLOTS : STANDARD_SLOTS;
-
-  const handlePlayerSelect = (player: NFLPlayer) => {
-    if (selectingSlot) {
-      const playerToSave = {
-        ...player,
-        projection: player.projection !== undefined ? Number(player.projection) : 0,
-        actualScore: player.actualScore !== undefined ? Number(player.actualScore) : 0
-      };
-      const newLineup = { ...lineup, [selectingSlot.id]: playerToSave };
-      setLineup(newLineup);
-      saveLineupToFirestore(newLineup);
-      setSelectingSlot(null);
-    }
-  };
-
-  const handleRemovePlayer = (slotId: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    const newLineup = { ...lineup };
-    delete newLineup[slotId];
-    setLineup(newLineup);
-    saveLineupToFirestore(newLineup);
-  };
-
-  return (
-    <div>
-      {/* Round Selector */}
-      <div className="flex space-x-1 bg-gray-100 p-1 rounded-lg overflow-x-auto mb-6">
-        {ROUNDS.map((round) => {
-          const isLocked = !unlockedRounds.includes(round.id);
-          return (
-            <button
-              key={round.id}
-              onClick={() => !isLocked && setActiveRound(round.id)}
-              disabled={isLocked}
-              className={`px-4 py-2 rounded-md text-sm font-bold whitespace-nowrap transition-all flex-1 flex items-center justify-center ${
-                activeRound === round.id 
-                  ? 'bg-white text-blue-600 shadow-sm' 
-                  : isLocked 
-                    ? 'text-gray-400 cursor-not-allowed bg-gray-50'
-                    : 'text-gray-500 hover:text-gray-700'
-              }`}
-            >
-              {isLocked && <span className="mr-2 text-xs">🔒</span>}
-              {round.label}
-            </button>
-          );
-        })}
-      </div>
-
-      <GamesBar games={games} />
-
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-        <div className="bg-gray-50 px-6 py-4 border-b border-gray-200 flex justify-between items-center">
-          <div>
-             <h3 className="font-bold text-gray-800">Your Lineup</h3>
-             <div className="flex items-center mt-1 space-x-2">
-                <span className="text-xs text-gray-400">{league.type === 'standard' ? 'Standard' : 'Custom'}</span>
-                {saveStatus === 'saving' && <span className="text-xs text-blue-500 font-medium animate-pulse">• Saving...</span>}
-                {saveStatus === 'saved' && <span className="text-xs text-green-600 font-medium">• Saved</span>}
-                {saveStatus === 'error' && <span className="text-xs text-red-500 font-medium">• Save Failed</span>}
-             </div>
-          </div>
-        </div>
-
-        <div className="divide-y divide-gray-100">
-          {loadingData ? (
-             <div className="p-8 text-center text-gray-400">Loading {activeRound} Data...</div>
-          ) : (
-            rosterSlots.map((slot) => {
-              const player = lineup[slot.id];
-              return (
-                <div 
-                  key={slot.id}
-                  onClick={() => !player && setSelectingSlot({ id: slot.id, pos: slot.pos })}
-                  className={`flex items-center justify-between p-4 transition group ${
-                    !player ? 'cursor-pointer hover:bg-gray-50' : ''
-                  }`}
-                >
-                  <div className="w-16 flex-shrink-0">
-                    <span className={`text-xs font-bold px-2 py-1 rounded ${player ? 'bg-gray-100 text-gray-500' : 'bg-blue-100 text-blue-700'}`}>
-                      {slot.label}
-                    </span>
-                  </div>
-
-                  <div className="flex-1 px-4">
-                    {player ? (
-                      <div>
-                        <p className="font-bold text-gray-900 text-sm">{player.name}</p>
-                        <div className="flex items-center gap-2 mt-1">
-                          <p className="text-xs text-gray-500">{player.team} {player.opponent ? `vs ${player.opponent}` : ''}</p>
-                          <span className="bg-green-50 text-green-700 text-[10px] font-bold px-1.5 py-0.5 rounded border border-green-100">
-                            Proj: {Number(player.projection).toFixed(1)}
-                          </span>
-                        </div>
-                      </div>
-                    ) : (
-                      <p className="text-sm text-gray-400 italic">Empty Slot</p>
-                    )}
-                  </div>
-
-                  <div>
-                    {player ? (
-                      <button onClick={(e) => handleRemovePlayer(slot.id, e)} className="text-gray-300 hover:text-red-500 transition px-2">✕</button>
-                    ) : (
-                      <button className="h-8 w-8 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center font-bold hover:bg-blue-100 transition group-hover:scale-110">+</button>
-                    )}
-                  </div>
-                </div>
-              );
-            })
-          )}
-        </div>
-      </div>
-
-      <PlayerSelector 
-        isOpen={!!selectingSlot}
-        positionNeeded={selectingSlot?.pos || ''}
-        availablePlayers={allPlayers}
-        onClose={() => setSelectingSlot(null)}
-        onSelect={handlePlayerSelect}
-      />
-    </div>
-  );
-};
-
-// --- PLACEHOLDER TABS ---
-const LeaderboardTab = () => <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200 text-center text-gray-500">Leaderboard Coming Soon</div>;
-const RulesTab = () => <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200 text-center text-gray-500">League Rules</div>;
-const SettingsTab = () => <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200 text-center text-gray-500">League Settings</div>;
-
-// --- MAIN PAGE ---
 export default function LeaguePage() {
   const params = useParams();
-  const router = useRouter();
-  const [user, setUser] = useState<User | null>(null);
-  const [leagueData, setLeagueData] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'selections' | 'leaderboard' | 'rules' | 'settings'>('selections');
-
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
-      if (!currentUser) return router.push('/login');
-      setUser(currentUser);
-      if (params.id) {
-        try {
-          const docSnap = await getDoc(doc(db, 'leagues', params.id as string));
-          if (docSnap.exists()) {
-             setLeagueData({ id: docSnap.id, ...docSnap.data() });
-          } else {
-             router.push('/');
-          }
-        } catch (e) { 
-           console.error(e); 
-        } finally { 
-           setLoading(false); 
-        }
-      }
-    });
-    return () => unsubscribe();
-  }, [params.id, router]);
-
-  if (loading) return <div className="min-h-screen flex items-center justify-center bg-gray-50 text-gray-500">Loading League...</div>;
-  if (!leagueData || !user) return null;
   
-  const isOwner = user.uid === leagueData.ownerId;
+  // --- STATE ---
+  const [activeTab, setActiveTab] = useState('Selections'); // <--- RESTORED TAB STATE
+  const [activeRound, setActiveRound] = useState('wildcard');
+  
+  const [games, setGames] = useState<any[]>([]);
+  const [availablePlayers, setAvailablePlayers] = useState<any[]>([]);
+  const [lineup, setLineup] = useState<Record<string, any>>({}); 
+  
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [selectedSlot, setSelectedSlot] = useState<string | null>(null);
+
+  // --- FETCH DATA ---
+  useEffect(() => {
+    const fetchRoundData = async () => {
+      setGames([]); 
+      setAvailablePlayers([]);
+
+      let cacheId = '';
+      if (activeRound === 'wildcard') cacheId = 'nfl_post_week_1';
+      if (activeRound === 'divisional') cacheId = 'nfl_post_week_2';
+      if (activeRound === 'conference') cacheId = 'nfl_post_week_3';
+      if (activeRound === 'superbowl') cacheId = 'nfl_post_week_4';
+
+      if (!cacheId) return;
+
+      try {
+        const docRef = doc(db, 'system_cache', cacheId);
+        const snapshot = await getDoc(docRef);
+
+        if (snapshot.exists()) {
+          const data = snapshot.data();
+          if (data.payload) {
+            setGames(data.payload.games || []);
+            setAvailablePlayers(data.payload.players || []);
+          }
+        }
+      } catch (err) {
+        console.error("Error fetching data:", err);
+      }
+    };
+
+    fetchRoundData();
+  }, [activeRound]);
+
+  // --- HELPERS ---
+  const isRoundLocked = (roundId: string) => {
+    const now = new Date();
+    // @ts-ignore
+    const deadline = ROUND_SCHEDULE[roundId];
+    return now > deadline;
+  };
+
+  // --- HANDLERS ---
+  const handleSlotClick = (slotId: string) => {
+    if (isRoundLocked(activeRound)) return;
+    setSelectedSlot(slotId);
+    setIsModalOpen(true);
+  };
+
+  const handleSelectPlayer = (player: any) => {
+    if (!selectedSlot) return;
+    setLineup(prev => ({
+      ...prev,
+      [selectedSlot]: player
+    }));
+    setIsModalOpen(false);
+    setSelectedSlot(null);
+  };
+
+  const getFilteredPlayers = () => {
+    if (!selectedSlot) return [];
+    let requiredPos = selectedSlot.replace(/[0-9]/g, '');
+    return availablePlayers.filter(p => {
+      if (requiredPos === 'FLEX') {
+        return ['RB', 'WR', 'TE'].includes(p.pos || p.position);
+      }
+      return (p.pos || p.position) === requiredPos;
+    });
+  };
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col font-sans text-gray-900">
-      <header className="bg-white shadow-sm border-b border-gray-200 sticky top-0 z-10">
-        <div className="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
-          <div className="flex items-center space-x-4">
-            <button onClick={() => router.push('/')} className="text-gray-400 hover:text-gray-600 transition flex items-center font-medium">
-              <span className="mr-1">←</span> Back
-            </button>
-            <h1 className="text-2xl font-bold text-gray-900">{leagueData.name}</h1>
-            <span className="bg-blue-100 text-blue-700 text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wide">
-              {leagueData.type}
-            </span>
+    <div className="min-h-screen bg-gray-900 text-white pb-20">
+      
+      {/* HEADER WITH GREEN TRIM */}
+      <header className="bg-gray-800 border-b border-gray-700 border-t-4 border-t-green-400 sticky top-0 z-10 shadow-lg">
+        <div className="max-w-5xl mx-auto px-4 py-4 flex items-center justify-between">
+          <div>
+            <div className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1 flex items-center">
+              <svg className="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
+              Back
+            </div>
+            <h1 className="text-xl font-bold text-white">
+              Test League 1/5/26 
+              <span className="ml-2 text-xs bg-green-500/20 text-green-400 border border-green-500/30 px-2 py-0.5 rounded uppercase">Standard</span>
+            </h1>
           </div>
         </div>
       </header>
 
-      <main className="flex-1 max-w-6xl w-full mx-auto px-4 py-8">
-        <div className="flex flex-wrap gap-6 mb-8 border-b border-gray-200">
-          {['selections', 'leaderboard', 'rules'].map((tab) => (
+      {/* NAV TABS (INTERACTIVE) */}
+      <div className="bg-gray-800 border-b border-gray-700 mb-6">
+        <div className="max-w-5xl mx-auto px-4 flex space-x-6">
+          {['Selections', 'Leaderboard', 'Rules', 'Settings'].map((tab) => (
             <button 
               key={tab} 
-              onClick={() => setActiveTab(tab as any)} 
-              className={`pb-3 text-sm font-bold capitalize transition-all border-b-2 ${
+              onClick={() => setActiveTab(tab)} // <--- RESTORED CLICK HANDLER
+              className={`py-4 text-sm font-medium border-b-2 transition-colors ${
                 activeTab === tab 
-                  ? 'border-blue-600 text-blue-600' 
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  ? 'border-green-400 text-green-400' 
+                  : 'border-transparent text-gray-400 hover:text-gray-200'
               }`}
             >
               {tab}
             </button>
           ))}
-          {isOwner && (
-            <button 
-              onClick={() => setActiveTab('settings')} 
-              className={`pb-3 text-sm font-bold transition-all border-b-2 flex items-center ${
-                activeTab === 'settings' 
-                  ? 'border-red-600 text-red-600' 
-                  : 'border-transparent text-gray-400 hover:text-red-600 hover:border-red-300'
-              }`}
-            >
-              Settings
-            </button>
-          )}
         </div>
+      </div>
 
-        <div className="animate-fadeIn">
-          {activeTab === 'selections' && <SelectionsTab league={leagueData} user={user} />}
-          {activeTab === 'leaderboard' && <LeaderboardTab />}
-          {activeTab === 'rules' && <RulesTab />}
-          {activeTab === 'settings' && isOwner && <SettingsTab />}
-        </div>
+      <main className="max-w-5xl mx-auto px-4 space-y-6">
+        
+        {/* --- TAB CONTENT: SELECTIONS --- */}
+        {activeTab === 'Selections' && (
+          <>
+            {/* ROUND SELECTOR */}
+            <div className="grid grid-cols-4 gap-2 bg-gray-800 p-1 rounded-xl border border-gray-700">
+              {['wildcard', 'divisional', 'conference', 'superbowl'].map((roundId) => {
+                const locked = isRoundLocked(roundId);
+                const active = activeRound === roundId;
+                const label = roundId.charAt(0).toUpperCase() + roundId.slice(1); 
+
+                return (
+                  <button
+                    key={roundId}
+                    onClick={() => setActiveRound(roundId)}
+                    className={`relative py-2 text-sm font-bold rounded-lg transition-all flex items-center justify-center space-x-1 
+                      ${active 
+                        ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/50' 
+                        : 'text-gray-400 hover:bg-gray-700 hover:text-white'
+                      }`}
+                  >
+                    {locked && <svg className="w-3 h-3 opacity-70" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" /></svg>}
+                    <span>{label}</span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* GAMES BAR */}
+            <div className="flex space-x-4 overflow-x-auto pb-2 scrollbar-hide min-h-[80px]">
+              {games.length === 0 ? (
+                <div className="w-full text-center py-4 text-gray-500 italic text-sm">Loading games...</div>
+              ) : (
+                games.map((game) => (
+                  <div key={game.id} className="min-w-[160px] bg-gray-800 border border-gray-700 rounded-xl p-3 flex flex-col items-center justify-center text-center shadow-sm flex-shrink-0">
+                    <span className="text-xs text-gray-400 font-mono mb-1">{game.date?.slice(4,6)}/{game.date?.slice(6,8)} • {game.time}</span>
+                    <div className="text-sm font-bold text-white whitespace-nowrap">{game.away || 'TBD'} @ {game.home || 'TBD'}</div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            {/* LINEUP CARD */}
+            <div className="bg-gray-800 rounded-xl border-x border-b border-t-4 border-gray-700 border-t-green-400 shadow-lg overflow-hidden">
+              <div className="px-6 py-4 border-b border-gray-700 bg-gray-800/50">
+                <h2 className="text-lg font-bold text-white">Your Lineup</h2>
+                <div className="flex items-center text-xs text-gray-400 mt-1 space-x-2">
+                  <span>Standard</span>
+                  <span className="w-1 h-1 bg-gray-600 rounded-full"></span>
+                  {isRoundLocked(activeRound) ? (
+                    <span className="text-red-400 flex items-center font-semibold"><svg className="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" /></svg>Locked</span>
+                  ) : (
+                    <span className="text-green-400 flex items-center font-semibold"><svg className="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>Open for Edits</span>
+                  )}
+                </div>
+              </div>
+
+              <div className="divide-y divide-gray-700">
+                {POSITIONS.map((pos) => {
+                  const player = lineup[pos.id];
+                  const isLocked = isRoundLocked(activeRound);
+
+                  return (
+                    <div 
+                      key={pos.id} 
+                      onClick={() => handleSlotClick(pos.id)} 
+                      className={`
+                        px-4 py-4 flex items-center transition-colors
+                        ${!isLocked ? 'cursor-pointer hover:bg-gray-750' : 'cursor-default opacity-80'}
+                      `}
+                    >
+                      <div className="w-12 flex-shrink-0">
+                        <span className="inline-block px-2 py-1 bg-gray-700 text-gray-300 text-xs font-bold rounded text-center min-w-[36px]">
+                          {pos.label || pos.id}
+                        </span>
+                      </div>
+                      <div className="flex-1 ml-4">
+                        {player ? (
+                          <div>
+                            <div className="text-sm font-bold text-white">{player.name}</div>
+                            <div className="text-xs text-gray-400">{player.team} • {player.opponent}</div>
+                          </div>
+                        ) : (
+                          <div className="text-sm text-gray-500 italic">Empty Slot</div>
+                        )}
+                      </div>
+                      <div className="text-right">
+                        <span className="text-gray-600 text-sm">{player ? player.projected?.toFixed(1) : '-'}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* --- PLACEHOLDER CONTENT FOR OTHER TABS --- */}
+        {activeTab === 'Leaderboard' && (
+          <div className="text-center py-20 text-gray-500">
+            <h2 className="text-xl font-bold text-white mb-2">Leaderboard</h2>
+            <p>Standings coming soon...</p>
+          </div>
+        )}
+        
+        {activeTab === 'Rules' && (
+          <div className="bg-gray-800 p-6 rounded-xl border border-gray-700 text-gray-300">
+            <h2 className="text-xl font-bold text-white mb-4">League Rules</h2>
+            <ul className="list-disc pl-5 space-y-2">
+              <li>Coming Soon.</li>
+            </ul>
+          </div>
+        )}
+
+        {activeTab === 'Settings' && (
+          <div className="text-center py-20 text-gray-500">
+            <h2 className="text-xl font-bold text-white mb-2">Settings</h2>
+            <p>Coming Soon.</p>
+          </div>
+        )}
+
       </main>
+
+      {/* --- PLAYER SELECTION MODAL --- */}
+      {isModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+          <div className="bg-gray-800 w-full max-w-lg rounded-xl border border-gray-700 shadow-2xl flex flex-col max-h-[80vh]">
+            {/* Modal Header */}
+            <div className="px-4 py-3 border-b border-gray-700 flex justify-between items-center bg-gray-900/50 rounded-t-xl">
+              <h3 className="text-white font-bold">Select {selectedSlot}</h3>
+              <button onClick={() => setIsModalOpen(false)} className="text-gray-400 hover:text-white p-1">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Players List */}
+            <div className="flex-1 overflow-y-auto p-2 scrollbar-hide"> 
+              {getFilteredPlayers().length === 0 ? (
+                <div className="p-8 text-center text-gray-500">No players found for this position.</div>
+              ) : (
+                getFilteredPlayers().map((p: any) => (
+                  <button
+                    key={p.playerID || p.id}
+                    onClick={() => handleSelectPlayer(p)}
+                    className="w-full text-left flex items-center justify-between p-3 hover:bg-gray-700 rounded-lg group transition-colors border-b border-gray-700/50 last:border-0"
+                  >
+                    <div>
+                      <div className="font-bold text-white group-hover:text-green-400">{p.longName || p.name}</div>
+                      <div className="text-xs text-gray-400">{p.team} • {p.pos}</div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-sm font-mono text-green-200">{Number(p.fantasyPoints || p.projectedPoints || 0).toFixed(1)}</div>
+                      <div className="text-[10px] text-gray-500">proj</div>
+                    </div>
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

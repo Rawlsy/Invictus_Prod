@@ -1,8 +1,12 @@
 ﻿import { NextResponse } from 'next/server';
-import { doc, setDoc } from 'firebase/firestore'; 
+import { doc, setDoc, writeBatch } from 'firebase/firestore'; 
 import { db } from '@/lib/firebase';
 
 export const dynamic = 'force-dynamic';
+
+function sanitize(obj: any) {
+  return JSON.parse(JSON.stringify(obj));
+}
 
 export async function GET(request: Request) {
   try {
@@ -15,26 +19,102 @@ export async function GET(request: Request) {
        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    // --- 1. CONFIGURATION (CORRECTED FOR 2026 REALITY) ---
-    // Current Date: Jan 2026
-    // Current Season: 2025
-    // Upcoming Round: Divisional (Week 20)
-    const targetSeason = searchParams.get('season') || '2025'; 
-    const targetWeek = searchParams.get('week') || '20';
-
-    console.log(`[Sync] 🚀 STARTING 2025 DIVISIONAL SYNC`);
-    console.log(`[Sync] Target: Week ${targetWeek}, Season ${targetSeason}`);
-
     const headers = {
         'x-rapidapi-key': process.env.NEXT_PUBLIC_RAPIDAPI_KEY || '',
         'x-rapidapi-host': 'tank01-nfl-live-in-game-real-time-statistics-nfl.p.rapidapi.com'
     };
 
-    // --- 2. FETCH PROJECTIONS (Use 'season', not 'archiveSeason') ---
-    // We remove 'archiveSeason' because 2025 is the CURRENT active season.
+    // --- 2. CONFIGURATION ---
+    let targetWeek = searchParams.get('week') || '19'; 
+    let targetSeason = searchParams.get('season') || '2025';
+
+    // Auto-Discovery: Only if week is truly missing
+    if (!searchParams.get('week')) {
+        const infoRes = await fetch('https://tank01-nfl-live-in-game-real-time-statistics-nfl.p.rapidapi.com/getNFLCurrentInfo', { headers });
+        const infoData = await infoRes.json();
+        const rawWeek = infoData.body?.week || '1';
+        
+        if (typeof rawWeek === 'string' && rawWeek.toLowerCase().includes('post season')) {
+            const relativeWeek = parseInt(rawWeek.replace(/\D/g, ''));
+            targetWeek = (18 + relativeWeek).toString(); 
+        } else {
+            targetWeek = rawWeek.replace(/\D/g, ''); 
+        }
+    }
+
+    // --- 3. DETERMINE API PARAMETERS ---
+    const weekNum = parseInt(targetWeek);
+    
+    // VARIABLES FOR API (Must be Relative: 1, 2, 3...)
+    let apiWeek = targetWeek; 
+    let seasonType = 'reg';
+    let dbWeek = targetWeek;
+
+    // Force Post Season Logic
+    if (weekNum > 18) {
+        seasonType = 'post';
+        apiWeek = (weekNum - 18).toString(); 
+        console.log(`[Sync] 🏈 Post Season Detected. DB Week: ${dbWeek} -> API Week: ${apiWeek}`);
+    }
+
+    const roundMap: Record<string, string> = {
+        '19': 'wildcard',
+        '20': 'divisional',
+        '21': 'conference',
+        '22': 'superbowl'
+    };
+    const roundName = roundMap[dbWeek] || `week_${dbWeek}`;
+
+    // --- 4. FETCH SCHEDULE (WITH PARSING FALLBACK) ---
+    const scheduleUrl = `https://tank01-nfl-live-in-game-real-time-statistics-nfl.p.rapidapi.com/getNFLGamesForWeek?week=${apiWeek}&season=${targetSeason}&seasonType=${seasonType}`;
+    
+    console.log(`[Sync] 📅 Fetching Schedule: ${scheduleUrl}`);
+    const gamesRes = await fetch(scheduleUrl, { headers });
+    const gamesData = await gamesRes.json();
+
+    const validTeams = new Set<string>();
+    let schedule: any[] = [];
+
+    if (Array.isArray(gamesData.body)) {
+        schedule = gamesData.body.map((g: any) => {
+            // FALLBACK PARSING: If API homeTeam is missing, parse from ID
+            // Format: YYYYMMDD_AWAY@HOME (e.g., 20260110_GB@CHI)
+            let home = g.homeTeam;
+            let away = g.awayTeam;
+
+            if (!home || !away) {
+                try {
+                    const parts = g.gameID.split('_'); // ["20260110", "GB@CHI"]
+                    if (parts.length > 1) {
+                        const teams = parts[1].split('@'); // ["GB", "CHI"]
+                        away = teams[0];
+                        home = teams[1];
+                        console.log(`[Sync] ⚠️ Parsed missing teams from ID: ${away} @ ${home}`);
+                    }
+                } catch (e) {
+                    console.error("Error parsing gameID:", g.gameID);
+                }
+            }
+
+            // Add valid teams to whitelist
+            if (home) validTeams.add(home);
+            if (away) validTeams.add(away);
+
+            return {
+                id: g.gameID,
+                home: home, // Now guaranteed to exist if ID is valid
+                away: away,
+                date: g.gameDate,
+                time: g.gameTime
+            };
+        });
+    }
+
+    // --- 5. FETCH PROJECTIONS ---
     const projParams = new URLSearchParams({
-        week: targetWeek,
-        season: targetSeason, // <--- CHANGED FROM archiveSeason
+        week: apiWeek, 
+        season: targetSeason,
+        seasonType: seasonType,
         itemFormat: 'list',
         twoPointConversions: '2', passYards: '.04', passAttempts: '-.5', passTD: '4',
         passCompletions: '1', passInterceptions: '-2', pointsPerReception: '1',
@@ -42,91 +122,83 @@ export async function GET(request: Request) {
         receivingYards: '.1', receivingTD: '6', targets: '.1',
         fgMade: '3', fgMissed: '-1', xpMade: '1', xpMissed: '-1'
     });
-    const projUrl = `https://tank01-nfl-live-in-game-real-time-statistics-nfl.p.rapidapi.com/getNFLProjections?${projParams.toString()}`;
 
-    // --- 3. FETCH GAMES SCHEDULE ---
-    const gamesUrl = `https://tank01-nfl-live-in-game-real-time-statistics-nfl.p.rapidapi.com/getNFLGamesForWeek?week=${targetWeek}&season=${targetSeason}`;
-
-    console.log(`[Sync] 🔗 Fetching Projections: ${projUrl}`);
-
-    const [projRes, gamesRes] = await Promise.all([
-        fetch(projUrl, { method: 'GET', headers }),
-        fetch(gamesUrl, { method: 'GET', headers })
-    ]);
-
+    console.log(`[Sync] 📊 Fetching Projections: Week ${apiWeek} (${seasonType})`);
+    const projRes = await fetch(`https://tank01-nfl-live-in-game-real-time-statistics-nfl.p.rapidapi.com/getNFLProjections?${projParams.toString()}`, { headers });
     const projData = await projRes.json();
-    const gamesData = await gamesRes.json();
-
-    // --- 4. PROCESS DATA ---
     const body = projData.body || {};
+    
+    // --- 6. FILTER PLAYERS ---
     let combinedList: any[] = [];
 
-    // Process Players
     if (Array.isArray(body.playerProjections)) {
-        combinedList = [...body.playerProjections];
+        combinedList = body.playerProjections.filter((p: any) => validTeams.has(p.team));
     }
-
-    // Process Defenses
+    
     if (Array.isArray(body.teamDefenseProjections)) {
-        const defenses = body.teamDefenseProjections.map((def: any) => ({
-            playerID: `DEF_${def.teamAbv}`,
-            longName: `${def.teamAbv} Defense`,
-            team: def.teamAbv,
-            pos: 'DEF',
-            fantasyPoints: def.fantasyPointsDefault || def.fantasyPoints || 0
-        }));
+        const defenses = body.teamDefenseProjections
+            .filter((def: any) => validTeams.has(def.teamAbv))
+            .map((def: any) => ({
+                playerID: `DEF_${def.teamAbv}`,
+                longName: `${def.teamAbv} Defense`,
+                team: def.teamAbv,
+                pos: 'DEF',
+                fantasyPoints: def.fantasyPointsDefault || def.fantasyPoints || 0
+            }));
         combinedList = [...combinedList, ...defenses];
     }
 
-    // Process Schedule
-    let schedule: any[] = [];
-    const rawGames = gamesData.body || [];
-    if (Array.isArray(rawGames)) {
-        schedule = rawGames.map((g: any) => ({
-            id: g.gameID,
-            home: g.homeTeam,
-            away: g.awayTeam,
-            date: g.gameDate,
-            time: g.gameTime
-        }));
+    if (combinedList.length === 0) {
+        return NextResponse.json({ success: false, message: `No players matched the schedule for Week ${apiWeek}.` });
     }
 
-    console.log(`[Sync] ✅ Found ${combinedList.length} players and ${schedule.length} games.`);
-
-    if (combinedList.length === 0 && schedule.length === 0) {
-        return NextResponse.json({ 
-            success: false, 
-            message: `No data found for Week ${targetWeek} Season ${targetSeason}. API might be updating.` 
-        });
-    }
-
-    // --- 5. SAVE TO FIREBASE ---
-    // Map Week 20 (Divisional) -> nfl_post_week_2
-    let docId = `nfl_reg_week_${targetWeek}`;
-    if (parseInt(targetWeek) > 18) {
-        const pIndex = parseInt(targetWeek) - 18;
-        docId = `nfl_post_week_${pIndex}`;
-    }
-
-    // For testing: If you want to see this data in your "Wildcard" tab, keep this override.
-    // Otherwise, remove it to save to the correct Divisional bucket.
-    if (searchParams.get('round') === 'wildcard') {
-        docId = 'nfl_post_week_1';
-    }
-
-    const docRef = doc(db, 'system_cache', docId);
-    await setDoc(docRef, {
+    // --- 7. SAVE TO DB ---
+    let cacheId = parseInt(dbWeek) > 18 ? `nfl_post_week_${parseInt(dbWeek) - 18}` : `nfl_reg_week_${dbWeek}`;
+    
+    const cacheData = sanitize({
         lastUpdated: new Date().toISOString(),
-        payload: { 
-            players: combinedList,
-            games: schedule 
-        },
-        meta: { week: targetWeek, season: targetSeason }
+        payload: { players: combinedList, games: schedule }, 
+        meta: { week: dbWeek, season: targetSeason, round: roundName }
     });
+    
+    await setDoc(doc(db, 'system_cache', cacheId), cacheData);
+
+    const batch = writeBatch(db);
+    const chunkSize = 400; 
+
+    for (let i = 0; i < combinedList.length; i += chunkSize) {
+        const chunk = combinedList.slice(i, i + chunkSize);
+        const subBatch = writeBatch(db);
+        
+        chunk.forEach((player) => {
+            const pid = player.playerID || player.id;
+            if (!pid) return;
+
+            const playerRef = doc(db, 'players', pid);
+            const projPoints = Number(player.fantasyPoints || player.projectedPoints || 0);
+
+            const updateData = sanitize({
+                id: pid,
+                name: player.longName || player.name,
+                team: player.team,
+                position: player.pos || player.position,
+                weeks: {
+                    [roundName]: { 
+                        projected: projPoints,
+                        score: 0, 
+                        opponent: player.opponent || player.gameOpponent || 'BYE'
+                    }
+                }
+            });
+
+            subBatch.set(playerRef, updateData, { merge: true });
+        });
+        await subBatch.commit();
+    }
 
     return NextResponse.json({ 
         success: true, 
-        message: `Synced ${combinedList.length} players and ${schedule.length} games to ${docId} (Season ${targetSeason})`
+        message: `Synced ${combinedList.length} players & ${schedule.length} games for ${roundName}.` 
     });
 
   } catch (error: any) {
