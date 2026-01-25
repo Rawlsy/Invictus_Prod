@@ -6,7 +6,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { doc, setDoc, updateDoc, deleteField, onSnapshot, collection, getDocs, query, where, documentId, limit, orderBy } from 'firebase/firestore'; 
 import { onAuthStateChanged, User } from 'firebase/auth'; 
 import { db, auth } from '@/lib/firebase'; 
-import { Lock, Search, ChevronLeft, Trash2, AlertCircle, CalendarClock, Trophy } from 'lucide-react'; 
+import { Lock, Search, ChevronLeft, Trash2, AlertCircle, CalendarClock, Trophy, Share2, Copy, Check, Users, Shield, Crown, Key } from 'lucide-react'; 
 
 const DB_LINEUP_KEYS = {
   wildcard: "Wild Card Lineup",
@@ -66,20 +66,23 @@ export default function LeaguePage() {
   const [games, setGames] = useState<any[]>([]);
   const [modalPlayers, setModalPlayers] = useState<any[]>([]); 
   const [lineup, setLineup] = useState<Record<string, any>>({}); 
-  
   const [previouslySelectedIds, setPreviouslySelectedIds] = useState<Set<string>>(new Set());
   const [currentRoundIds, setCurrentRoundIds] = useState<Set<string>>(new Set());
   
   const [systemWeek, setSystemWeek] = useState<string | null>(null);
-  
   const [leagueName, setLeagueName] = useState("Loading...");
   const [leagueScoring, setLeagueScoring] = useState("PPR"); 
+  const [ownerId, setOwnerId] = useState<string | null>(null);
+  const [leaguePassword, setLeaguePassword] = useState<string>("Loading..."); 
+  const [leaguePrivacy, setLeaguePrivacy] = useState<string>("Private");
 
   const [leaderboard, setLeaderboard] = useState<any[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedSlot, setSelectedSlot] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [isLoadingLineup, setIsLoadingLineup] = useState(false);
+  const [isCopied, setIsCopied] = useState(false);
+  const [isMember, setIsMember] = useState(true);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
@@ -87,7 +90,10 @@ export default function LeaguePage() {
           setAuthUser(user);
           setUserId(user.uid);
       }
-      else router.push('/login');
+      else {
+          const returnUrl = encodeURIComponent(window.location.pathname);
+          router.push(`/login?redirect=${returnUrl}`);
+      }
     });
     return () => unsubscribe();
   }, [router]);
@@ -119,6 +125,15 @@ export default function LeaguePage() {
       if (docSnap.exists()) {
         const data = docSnap.data();
         setLeagueName(data.name || "Untitled League");
+        setOwnerId(data.ownerId || null);
+        setLeaguePrivacy(data.privacy || "Private");
+        
+        if (data.password && data.password.length > 0) {
+            setLeaguePassword(data.password);
+        } else {
+            setLeaguePassword("None");
+        }
+
         let scoreType = data.scoringType || data.scoring || "PPR";
         if (scoreType === "Half PPR") scoreType = "Half-PPR"; 
         setLeagueScoring(scoreType); 
@@ -154,6 +169,11 @@ export default function LeaguePage() {
           ...doc.data() 
       }));
 
+      if (userId) {
+          const amIMember = rawMembers.some(m => m.id === userId);
+          setIsMember(amIMember);
+      }
+
       const sortedMembers = rawMembers.sort((a: any, b: any) => {
           const scoreA = a.scores?.Total || 0;
           const scoreB = b.scores?.Total || 0;
@@ -168,11 +188,11 @@ export default function LeaguePage() {
       setLeaderboard(rankedMembers);
     });
     return () => unsubscribe();
-  }, [params.id]);
+  }, [params.id, userId]);
 
   // 3. FETCH LINEUP
   useEffect(() => {
-    if (!userId || !params.id) return;
+    if (!userId || !params.id || !isMember) return;
     
     const memberRef = doc(db, 'leagues', params.id as string, 'Members', userId);
     
@@ -231,7 +251,7 @@ export default function LeaguePage() {
       }
     });
     return () => unsubscribe();
-  }, [activeRound, params.id, userId]);
+  }, [activeRound, params.id, userId, isMember]);
 
   // FIX: AUTO-UPDATE USERNAME IF MISSING
   useEffect(() => {
@@ -258,16 +278,16 @@ export default function LeaguePage() {
         const playersRef = collection(db, 'players');
         let q;
         const scoringKeys = SCORING_KEYS[leagueScoring] || SCORING_KEYS['PPR'];
-        const sortField = `${ROUND_TO_DB_MAP[activeRound]}.${scoringKeys.proj}`;
+        // const sortField = `${ROUND_TO_DB_MAP[activeRound]}.${scoringKeys.proj}`;
 
         if (requiredPos === 'FLEX') {
-             q = query(playersRef, where('position', 'in', ['RB', 'WR', 'TE']), orderBy(sortField, 'desc'), limit(100)); 
+             q = query(playersRef, where('position', 'in', ['RB', 'WR', 'TE']), limit(100)); 
         } else if (requiredPos === 'DEF') {
-             q = query(playersRef, where('position', '==', 'DEF'), orderBy(sortField, 'desc'), limit(50));
+             q = query(playersRef, where('position', '==', 'DEF'), limit(50));
         } else if (requiredPos === 'K') {
-             q = query(playersRef, where('position', '==', 'K'), orderBy(sortField, 'desc'), limit(50));
+             q = query(playersRef, where('position', '==', 'K'), limit(50));
         } else {
-             q = query(playersRef, where('position', '==', requiredPos), orderBy(sortField, 'desc'), limit(50));
+             q = query(playersRef, where('position', '==', requiredPos), limit(50));
         }
 
         const snapshot = await getDocs(q);
@@ -284,6 +304,33 @@ export default function LeaguePage() {
           fetchPlayersForSlot(selectedSlot);
       }
   }, [isModalOpen, selectedSlot, fetchPlayersForSlot]);
+
+  // JOIN LEAGUE
+  const handleJoinLeague = async () => {
+      if (!userId || !params.id || !authUser) return;
+      try {
+          const memberRef = doc(db, 'leagues', params.id as string, 'Members', userId);
+          const displayName = authUser.displayName || authUser.email?.split('@')[0] || 'New Member';
+          await setDoc(memberRef, {
+              username: displayName,
+              joinedAt: new Date().toISOString(),
+              scores: { Total: 0 }
+          });
+          setIsMember(true);
+          setActiveTab('Selections');
+      } catch (error) {
+          console.error("Error joining league:", error);
+      }
+  };
+
+  // SHARE
+  const handleShare = () => {
+      const url = window.location.href;
+      navigator.clipboard.writeText(url).then(() => {
+          setIsCopied(true);
+          setTimeout(() => setIsCopied(false), 2000);
+      });
+  };
 
   // Helpers
   const formatApiDate = (dateStr: string) => {
@@ -408,8 +455,14 @@ export default function LeaguePage() {
       return 'Unknown';
   };
 
+  const commissionerName = useMemo(() => {
+      if (!ownerId) return 'Unknown';
+      const commish = leaderboard.find(m => m.id === ownerId);
+      return commish ? (commish.username || 'Commissioner') : 'Commissioner';
+  }, [leaderboard, ownerId]);
+
   return (
-    <div className="relative pb-20 bg-[#020617] min-h-screen text-white font-sans overflow-x-hidden">
+    <div className="relative pb-24 bg-[#020617] min-h-screen text-white font-sans overflow-x-hidden">
       
       <div className="fixed inset-0 z-0 pointer-events-none">
         <div className="absolute inset-0 opacity-[0.05]" style={{ backgroundImage: `linear-gradient(#334155 1px, transparent 1px), linear-gradient(90deg, #334155 1px, transparent 1px)`, backgroundSize: '40px 40px' }} />
@@ -424,132 +477,160 @@ export default function LeaguePage() {
       `}</style>
 
       <div className="relative z-10">
-        <div className="bg-[#020617]/90 backdrop-blur-xl px-4 md:px-8 py-4 flex items-center justify-between border-b border-[#334155]/40 sticky top-0 z-50">
-          <h1 className="text-xl md:text-2xl font-black italic tracking-tighter text-white uppercase">INVICTUS<span className="text-[#22c55e]">SPORTS</span></h1>
-        </div>
+        <header className="sticky top-0 z-50 bg-[#020617]/95 backdrop-blur-xl border-b border-[#334155]/40 shadow-lg">
+          <div className="max-w-[1400px] mx-auto px-4 md:px-8 h-16 flex items-center justify-start gap-4">
+             <button onClick={() => router.push('/hub')} className="p-2 text-slate-400 hover:text-white transition-colors rounded-full hover:bg-white/5">
+                <ChevronLeft size={24} />
+             </button>
+             <h1 className="text-xl md:text-2xl font-black italic tracking-tighter text-white uppercase">
+                INVICTUS<span className="text-[#22c55e]">SPORTS</span>
+             </h1>
+          </div>
+        </header>
 
-        <main className="max-w-[1400px] mx-auto px-2 md:px-8 py-6 space-y-8">
+        <main className="max-w-[1400px] mx-auto px-2 md:px-8 py-4 space-y-6">
           
-          <div className="space-y-4 px-2">
-            <button onClick={() => router.back()} className="flex items-center text-[10px] font-bold text-slate-400 uppercase tracking-widest gap-1 hover:text-white transition-colors">
-              <ChevronLeft size={14} /> BACK TO HUB
-            </button>
+          <div className="px-2 pt-2">
             <div className="flex items-center justify-between">
-              <h2 className="text-2xl md:text-4xl font-black uppercase tracking-tight">{leagueName}</h2>
-              <span className="bg-[#064e3b] text-[#22c55e] px-3 py-1 rounded-md text-xs font-black uppercase tracking-widest border border-[#22c55e]/20">{leagueScoring}</span>
+              <h2 className="text-xl md:text-4xl font-black uppercase tracking-tight truncate pr-4">{leagueName}</h2>
+              <span className="bg-[#064e3b] text-[#22c55e] px-2 py-1 rounded-md text-[10px] md:text-xs font-black uppercase tracking-widest border border-[#22c55e]/20 whitespace-nowrap">
+                {leagueScoring}
+              </span>
             </div>
           </div>
 
-          <div className="flex border-b border-slate-800 overflow-x-auto no-scrollbar px-2">
-            {['Selections', 'Leaderboard', 'Rules'].map(tab => (
-              <button key={tab} onClick={() => setActiveTab(tab)} className={`py-3 px-6 text-sm font-bold tracking-tight transition-all border-b-2 whitespace-nowrap ${activeTab === tab ? 'border-[#22c55e] text-[#22c55e]' : 'border-transparent text-slate-500 hover:text-white'}`}>{tab}</button>
+          <div className="flex border-b border-slate-800 overflow-x-auto no-scrollbar px-2 gap-4">
+            {['Selections', 'Leaderboard', 'Details'].map(tab => (
+              <button 
+                key={tab} 
+                onClick={() => setActiveTab(tab)} 
+                className={`pb-3 px-2 text-sm font-bold tracking-tight transition-all border-b-2 whitespace-nowrap ${activeTab === tab ? 'border-[#22c55e] text-[#22c55e]' : 'border-transparent text-slate-500 hover:text-white'}`}
+              >
+                {tab}
+              </button>
             ))}
           </div>
 
           {activeTab === 'Selections' && (
-            <div className="space-y-10">
-              <div className="flex bg-slate-900/80 backdrop-blur-md p-1.5 rounded-xl border border-slate-700 shadow-xl mx-2">
-                {Object.keys(ROUND_TO_DB_MAP).map(r => {
-                    const status = getRoundStatus(r);
-                    const isActive = activeRound === r;
-                    const isLocked = status !== 'active';
-                    let statusColor = 'text-gray-500 hover:text-white';
-                    if (isActive) statusColor = 'bg-blue-600 text-white shadow-lg scale-[1.02]';
-                    else if (status === 'active') statusColor = 'text-[#22c55e] hover:text-white';
-                    return (
-                        <button key={r} onClick={() => setActiveRound(r as any)} className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-lg text-[10px] md:text-xs font-black uppercase tracking-widest transition-all ${statusColor}`}>
-                            {isLocked && <Lock size={12} />} {!isLocked && isActive && <span className="w-2 h-2 rounded-full bg-[#22c55e] animate-pulse"/>} {r}
-                        </button>
-                    )
-                })}
-              </div>
-
-              <div className="space-y-4 px-2">
-                <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-500 px-1">Live Playoff Schedule</h3>
-                <div className="flex gap-3 overflow-x-auto no-scrollbar pb-2">
-                  {games.map((game) => {
-                    const isCompleted = game.gameStatus === 'Completed' || game.gameStatus === 'Final';
-                    const isWildcard = activeRound === 'wildcard'; 
-                    const awayS = Number(game.awayScore || 0);
-                    const homeS = Number(game.homeScore || 0);
-                    return (
-                      <div key={game.id} className={`${isWildcard ? 'min-w-[170px] md:min-w-[195px] p-4' : 'min-w-[190px] md:min-w-[220px] p-5'} bg-slate-900/60 border ${isCompleted ? 'border-[#22c55e]/30' : 'border-slate-700'} rounded-2xl flex flex-col items-center gap-3 shadow-xl backdrop-blur-sm transition-all`}>
-                        <span className={`text-[9px] font-black uppercase tracking-widest ${isCompleted ? 'text-[#22c55e]' : 'text-slate-500'}`}>{isCompleted ? 'Final' : `${formatApiDate(game.Date)} • ${game.Time}`}</span>
-                        <div className="flex items-center justify-between w-full px-1">
-                          <div className="flex flex-col items-center flex-1">
-                            <span className={`${isWildcard ? 'text-[10px]' : 'text-[11px]'} font-black uppercase tracking-tighter ${isCompleted && awayS > homeS ? 'text-[#22c55e]' : 'text-white'}`}>{game['Away Team']}</span>
-                            {isCompleted && (<span className={`${isWildcard ? 'text-sm' : 'text-base'} font-black mt-1 ${awayS > homeS ? 'text-[#22c55e]' : 'text-slate-400'}`}>{awayS}</span>)}
-                          </div>
-                          <span className="text-[9px] font-bold text-slate-800 mx-1 italic">@</span>
-                          <div className="flex flex-col items-center flex-1">
-                            <span className={`${isWildcard ? 'text-[10px]' : 'text-[11px]'} font-black uppercase tracking-tighter ${isCompleted && homeS > awayS ? 'text-[#22c55e]' : 'text-white'}`}>{game['Home Team']}</span>
-                            {isCompleted && (<span className={`${isWildcard ? 'text-sm' : 'text-base'} font-black mt-1 ${homeS > awayS ? 'text-[#22c55e]' : 'text-slate-400'}`}>{homeS}</span>)}
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div className="max-w-4xl mx-auto w-full px-2">
-                <div className="bg-slate-900/90 border-2 border-[#22c55e] rounded-[2.5rem] shadow-2xl overflow-hidden backdrop-blur-md">
-                  <div className="px-6 md:px-10 py-7 border-b border-slate-800 bg-slate-900/50 flex justify-between items-end">
-                      <div>
-                          <h3 className="text-2xl font-black uppercase tracking-tight text-white mb-1">Your Lineup</h3>
-                          <div className="flex items-center gap-2 text-[11px] font-black uppercase tracking-widest text-slate-500">
-                            Active Round <span className="text-slate-700">•</span> 
-                            {getRoundStatus(activeRound) === 'past' && <span className="text-red-500 flex items-center gap-1"><Lock size={12}/> Locked (Round Over)</span>}
-                            {getRoundStatus(activeRound) === 'future' && <span className="text-blue-400 flex items-center gap-1"><CalendarClock size={12}/> Coming Soon</span>}
-                            {getRoundStatus(activeRound) === 'active' && <span className="text-[#22c55e] flex items-center gap-1">⚡ Open for Edits</span>}
-                            {isLoadingLineup && <span className="ml-2 text-blue-400 animate-pulse">Syncing...</span>}
-                          </div>
-                      </div>
-                      <div className="text-right">
-                          <div className="text-3xl font-black text-white tracking-tighter tabular-nums">{roundTotals.actual}</div>
-                          <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Proj: <span className="text-[#22c55e]">{roundTotals.projected}</span></div>
-                      </div>
+            <div className="space-y-8">
+              {!isMember ? (
+                  <div className="max-w-md mx-auto mt-10 p-8 bg-slate-900/80 border border-[#22c55e] rounded-2xl text-center shadow-2xl backdrop-blur-md">
+                      <Trophy className="mx-auto text-[#22c55e] mb-4" size={48} />
+                      <h3 className="text-2xl font-black uppercase text-white mb-2">Join This League</h3>
+                      <p className="text-slate-400 text-sm mb-6">You are viewing {leagueName}. Join now to build your lineup and compete!</p>
+                      <button onClick={handleJoinLeague} className="w-full bg-[#22c55e] hover:bg-[#16a34a] text-[#020617] font-black py-4 rounded-xl uppercase tracking-widest transition-transform hover:scale-[1.02]">
+                          Join League
+                      </button>
                   </div>
-                  <div className="divide-y divide-slate-800/50">
-                    {POSITIONS.map(pos => {
-                      const p = lineup[pos.id];
-                      const locked = isRoundLocked();
-                      const matchup = p ? getMatchupInfo(p.team || p.Team) : null;
-                      return (
-                        <div key={pos.id} onClick={() => !locked && (setSelectedSlot(pos.id), setIsModalOpen(true))} className={`px-6 md:px-10 py-7 flex items-center group transition-all ${!locked ? 'cursor-pointer hover:bg-white/5' : 'opacity-60 cursor-not-allowed'}`}>
-                          <div className="w-14 h-12 bg-slate-950 rounded-xl flex items-center justify-center border border-slate-800 group-hover:border-[#22c55e]/50 transition-colors">
-                            <span className="text-xs font-black text-slate-500 group-hover:text-[#22c55e]">{pos.label}</span>
-                          </div>
-                          <div className="flex-1 ml-6 md:ml-8">
-                            {p ? (
-                              <div className="flex flex-col gap-1">
-                                <span className="text-lg md:text-xl font-bold text-white tracking-tight leading-tight">{p.name || p.longName}</span>
-                                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
-                                  <span className="text-white font-black">{p.team}</span><span className="text-slate-800">|</span><span>{matchup?.opponent}</span><span className="text-slate-800">|</span><span className="text-[#22c55e]">Proj: {getPlayerProj(p).toFixed(1)}</span>
+              ) : (
+                  <>
+                    <div className="flex justify-center">
+                        <div className="grid grid-cols-2 md:flex gap-3 bg-slate-900/80 backdrop-blur-md p-2 rounded-xl border border-slate-700 shadow-xl w-full md:w-auto mx-auto">
+                            {Object.keys(ROUND_TO_DB_MAP).map(r => {
+                                const status = getRoundStatus(r);
+                                const isActive = activeRound === r;
+                                const isLocked = status !== 'active';
+                                let statusColor = 'text-gray-500 hover:text-white bg-slate-950/50';
+                                if (isActive) statusColor = 'bg-blue-600 text-white shadow-lg';
+                                else if (status === 'active') statusColor = 'text-[#22c55e] hover:text-white border border-[#22c55e]/30';
+                                return (
+                                    <button key={r} onClick={() => setActiveRound(r as any)} className={`flex items-center justify-center gap-2 py-3 px-4 rounded-lg text-[10px] md:text-xs font-black uppercase tracking-widest transition-all w-full md:w-auto ${statusColor}`}>
+                                        {isLocked && <Lock size={12} />} {!isLocked && isActive && <span className="w-2 h-2 rounded-full bg-[#22c55e] animate-pulse"/>} {r}
+                                    </button>
+                                )
+                            })}
+                        </div>
+                    </div>
+
+                    <div className="space-y-2">
+                        <h3 className="text-center text-[10px] font-black uppercase tracking-[0.3em] text-slate-500 px-3">Scheduled Games</h3>
+                        <div className="flex gap-4 overflow-x-auto no-scrollbar pb-2 snap-x justify-center w-full">
+                        {games.map((game) => {
+                            const isCompleted = game.gameStatus === 'Completed' || game.gameStatus === 'Final';
+                            const awayS = Number(game.awayScore || 0);
+                            const homeS = Number(game.homeScore || 0);
+                            return (
+                            <div key={game.id} className="snap-center min-w-[45vw] md:min-w-[200px] p-4 bg-slate-900/60 border border-slate-700 rounded-2xl flex flex-col items-center gap-2 shadow-lg backdrop-blur-sm">
+                                <span className={`text-[9px] font-black uppercase tracking-widest ${isCompleted ? 'text-[#22c55e]' : 'text-slate-500'}`}>{isCompleted ? 'Final' : `${formatApiDate(game.Date)} • ${game.Time}`}</span>
+                                <div className="flex items-center justify-between w-full px-1">
+                                <div className="flex flex-col items-center flex-1">
+                                    <span className="text-[10px] font-black uppercase text-white">{game['Away Team']}</span>
+                                    {isCompleted && (<span className="text-sm font-black text-slate-400">{awayS}</span>)}
                                 </div>
-                              </div>
-                            ) : (<span className="text-sm text-slate-600 font-bold uppercase tracking-[0.2em] italic">Assign {pos.name}</span>)}
-                          </div>
-                          <div className="flex items-center gap-4">
-                            <div className="text-2xl md:text-3xl font-black text-white tracking-tighter tabular-nums">{p ? getPlayerActual(p).toFixed(1) : '0.0'}</div>
-                            {p && !locked && (<button onClick={(e) => handleRemovePlayer(pos.id, e)} className="p-2 bg-slate-800/50 hover:bg-red-500/20 text-slate-500 hover:text-red-500 rounded-lg transition-all" title="Remove Player"><Trash2 size={16} /></button>)}
-                          </div>
+                                <span className="text-[9px] font-bold text-slate-800 mx-1">@</span>
+                                <div className="flex flex-col items-center flex-1">
+                                    <span className="text-[10px] font-black uppercase text-white">{game['Home Team']}</span>
+                                    {isCompleted && (<span className="text-sm font-black text-slate-400">{homeS}</span>)}
+                                </div>
+                                </div>
+                            </div>
+                            );
+                        })}
                         </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
+                    </div>
+
+                    <div className="max-w-4xl mx-auto w-full px-2">
+                        <div className="bg-slate-900/90 border-2 border-[#22c55e] rounded-[2rem] shadow-2xl overflow-hidden backdrop-blur-md">
+                        <div className="px-6 py-5 border-b border-slate-800 bg-slate-900/50 flex justify-between items-end">
+                            <div>
+                                <h3 className="text-xl md:text-2xl font-black uppercase tracking-tight text-white">Your Lineup</h3>
+                                <div className="text-[10px] font-black uppercase tracking-widest text-slate-500 mt-1 flex items-center gap-2">
+                                    {getRoundStatus(activeRound) === 'active' ? <span className="text-[#22c55e]">⚡ Open</span> : <span className="text-red-500">🔒 Locked</span>}
+                                    {isLoadingLineup && <span className="text-blue-400 animate-pulse">Syncing...</span>}
+                                </div>
+                            </div>
+                            <div className="text-right">
+                                <div className="text-2xl md:text-3xl font-black text-white tracking-tighter tabular-nums">{roundTotals.actual}</div>
+                                <div className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">Proj: <span className="text-[#22c55e]">{roundTotals.projected}</span></div>
+                            </div>
+                        </div>
+                        
+                        <div className="divide-y divide-slate-800/50">
+                            {POSITIONS.map(pos => {
+                            const p = lineup[pos.id];
+                            const locked = isRoundLocked();
+                            const matchup = p ? getMatchupInfo(p.team || p.Team) : null;
+                            return (
+                                <div key={pos.id} onClick={() => !locked && (setSelectedSlot(pos.id), setIsModalOpen(true))} className={`px-4 md:px-10 py-4 md:py-6 flex items-center group transition-all ${!locked ? 'cursor-pointer hover:bg-white/5' : 'opacity-60 cursor-not-allowed'}`}>
+                                <div className="w-10 h-10 md:w-14 md:h-12 bg-slate-950 rounded-xl flex items-center justify-center border border-slate-800 group-hover:border-[#22c55e]/50 transition-colors shrink-0">
+                                    <span className="text-[10px] md:text-xs font-black text-slate-500 group-hover:text-[#22c55e]">{pos.label}</span>
+                                </div>
+                                <div className="flex-1 ml-4 md:ml-8 overflow-hidden">
+                                    {p ? (
+                                    <div className="flex flex-col gap-0.5">
+                                        <span className="text-base md:text-xl font-bold text-white tracking-tight leading-tight truncate">{p.name || p.longName}</span>
+                                        <div className="flex flex-wrap items-center gap-x-2 gap-y-0 text-[9px] md:text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                                        <span className="text-white font-black">{p.team}</span>
+                                        <span className="text-slate-800">|</span>
+                                        <span>{matchup?.opponent}</span>
+                                        <span className="text-slate-800 hidden md:inline">|</span>
+                                        <span className="text-[#22c55e] block md:inline">Proj: {getPlayerProj(p).toFixed(1)}</span>
+                                        </div>
+                                    </div>
+                                    ) : (<span className="text-xs md:text-sm text-slate-600 font-bold uppercase tracking-[0.2em] italic">Assign {pos.name}</span>)}
+                                </div>
+                                <div className="flex items-center gap-3 md:gap-4 pl-2">
+                                    <div className="text-xl md:text-3xl font-black text-white tracking-tighter tabular-nums">{p ? getPlayerActual(p).toFixed(1) : '0.0'}</div>
+                                    {p && !locked && (<button onClick={(e) => handleRemovePlayer(pos.id, e)} className="p-2 bg-slate-800/50 hover:bg-red-500/20 text-slate-500 hover:text-red-500 rounded-lg transition-all" title="Remove"><Trash2 size={14} /></button>)}
+                                </div>
+                                </div>
+                            );
+                            })}
+                        </div>
+                        </div>
+                    </div>
+                  </>
+              )}
             </div>
           )}
 
           {activeTab === 'Leaderboard' && (
             <div className="max-w-5xl mx-auto w-full px-2">
-                <div className="bg-slate-900/90 border-2 border-[#22c55e] rounded-[2.5rem] shadow-2xl overflow-hidden backdrop-blur-md">
-                    <div className="px-6 md:px-10 py-7 border-b border-slate-800 bg-slate-900/50 flex justify-between items-center">
+                <div className="bg-slate-900/90 border-2 border-[#22c55e] rounded-[2rem] shadow-2xl overflow-hidden backdrop-blur-md">
+                    <div className="px-6 py-5 border-b border-slate-800 bg-slate-900/50 flex justify-between items-center">
                         <div>
-                            <h3 className="text-2xl font-black uppercase tracking-tight text-white mb-1">Leaderboard</h3>
-                            <div className="text-[11px] font-black uppercase tracking-widest text-slate-500">Top 20 Users • Sorted by Total Score</div>
+                            <h3 className="text-xl md:text-2xl font-black uppercase tracking-tight text-white mb-1">Leaderboard</h3>
+                            <div className="text-[10px] font-black uppercase tracking-widest text-slate-500">Top 20 Users • Sorted by Total Score</div>
                         </div>
                         <Trophy className="text-[#22c55e]" size={24} />
                     </div>
@@ -605,9 +686,62 @@ export default function LeaguePage() {
             </div>
           )}
 
+          {/* DETAILS TAB */}
+          {activeTab === 'Details' && (
+            <div className="max-w-3xl mx-auto w-full px-2 space-y-6">
+                <div className="grid grid-cols-2 gap-4">
+                    <div className="bg-slate-900/80 border border-slate-800 p-5 rounded-2xl flex flex-col gap-2">
+                        <div className="flex items-center gap-2 text-[#22c55e] text-xs font-black uppercase tracking-widest"><Crown size={14} /> Commissioner</div>
+                        <div className="text-lg font-bold text-white truncate">{commissionerName}</div>
+                    </div>
+                    <div className="bg-slate-900/80 border border-slate-800 p-5 rounded-2xl flex flex-col gap-2">
+                        <div className="flex items-center gap-2 text-[#22c55e] text-xs font-black uppercase tracking-widest"><Trophy size={14} /> Scoring</div>
+                        <div className="text-lg font-bold text-white">{leagueScoring}</div>
+                    </div>
+                    <div className="bg-slate-900/80 border border-slate-800 p-5 rounded-2xl flex flex-col gap-2">
+                        <div className="flex items-center gap-2 text-[#22c55e] text-xs font-black uppercase tracking-widest"><Users size={14} /> Members</div>
+                        <div className="text-lg font-bold text-white">{leaderboard.length}</div>
+                    </div>
+                    <div className="bg-slate-900/80 border border-slate-800 p-5 rounded-2xl flex flex-col gap-2">
+                        <div className="flex items-center gap-2 text-[#22c55e] text-xs font-black uppercase tracking-widest"><Shield size={14} /> Privacy</div>
+                        <div className="text-lg font-bold text-white">{leaguePrivacy}</div>
+                    </div>
+                    <div className="bg-slate-900/80 border border-slate-800 p-5 rounded-2xl flex flex-col gap-2 col-span-2 md:col-span-1 md:col-start-1">
+                        <div className="flex items-center gap-2 text-[#22c55e] text-xs font-black uppercase tracking-widest"><Key size={14} /> Password</div>
+                        <div className="text-lg font-bold text-white font-mono tracking-widest">{leaguePassword}</div>
+                    </div>
+                </div>
+
+                <div className="bg-slate-900/90 border border-slate-800 p-6 rounded-2xl backdrop-blur-md">
+                    <div className="flex items-center gap-3 mb-4">
+                        <div className="w-10 h-10 bg-[#22c55e]/10 rounded-full flex items-center justify-center text-[#22c55e]">
+                            <Share2 size={20} />
+                        </div>
+                        <div>
+                            <h3 className="text-lg font-bold text-white">Invite Friends</h3>
+                            <p className="text-xs text-slate-500">Share this link to invite others to join your league.</p>
+                        </div>
+                    </div>
+                    
+                    <div className="flex items-center gap-2 bg-slate-950 border border-slate-800 p-2 rounded-xl">
+                        <div className="flex-1 px-3 py-2 text-xs font-mono text-slate-400 truncate select-all">
+                            {typeof window !== 'undefined' ? window.location.href : 'Loading...'}
+                        </div>
+                        <button 
+                            onClick={handleShare}
+                            className={`p-3 rounded-lg font-bold text-xs uppercase tracking-widest transition-all ${isCopied ? 'bg-[#22c55e] text-[#020617]' : 'bg-slate-800 text-white hover:bg-slate-700'}`}
+                        >
+                            {isCopied ? <Check size={16} /> : <Copy size={16} />}
+                        </button>
+                    </div>
+                </div>
+            </div>
+          )}
+
         </main>
       </div>
 
+      {/* Modal - Mobile Optimized */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#020617]/95 p-4 backdrop-blur-sm">
           <div className="bg-slate-900 w-full max-w-xl rounded-[2rem] flex flex-col max-h-[85vh] border border-slate-700 shadow-2xl overflow-hidden animate-in zoom-in duration-200">

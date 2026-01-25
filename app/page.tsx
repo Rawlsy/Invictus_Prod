@@ -1,186 +1,75 @@
 ﻿'use client';
 
-import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import { onAuthStateChanged, signOut, User } from 'firebase/auth';
-import { auth } from '@/lib/firebase';
+import { Trophy, Shield, Users, ArrowRight } from 'lucide-react';
 
-export default function LandingPage() {
-  const [user, setUser] = useState<User | null>(null);
-  const router = useRouter();
-
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      setUser(currentUser);
-    });
-    return () => unsubscribe();
-  }, []);
-
-  const handleSignOut = async () => {
-    try {
-      await signOut(auth);
-      router.push('/'); 
-    } catch (error) {
-      console.error("Error signing out: ", error);
-    }
-  };
-
+export default function Home() {
   return (
-    <div className="min-h-screen bg-gray-900 text-white font-sans selection:bg-green-400 selection:text-black">
+    <div className="min-h-screen bg-[#020617] text-white font-sans flex flex-col relative overflow-hidden">
       
-      {/* --- NAV HEADER --- */}
-      <header className="max-w-7xl mx-auto px-12 py-10 relative">
+      {/* Background Grid */}
+      <div className="absolute inset-0 opacity-[0.03]" style={{ backgroundImage: `linear-gradient(#334155 1px, transparent 1px), linear-gradient(90deg, #334155 1px, transparent 1px)`, backgroundSize: '40px 40px' }} />
+      <div className="absolute top-0 w-full h-[50vh] bg-gradient-to-b from-[#22c55e]/10 to-transparent blur-3xl pointer-events-none" />
+
+      {/* Nav */}
+      <nav className="relative z-10 px-6 py-6 flex justify-between items-center max-w-6xl mx-auto w-full">
+        <h1 className="text-xl font-black italic tracking-tighter uppercase">INVICTUS<span className="text-[#22c55e]">SPORTS</span></h1>
+        <Link href="/login" className="px-5 py-2 rounded-full border border-slate-700 text-xs font-bold hover:bg-white/5 transition-all">SIGN IN</Link>
+      </nav>
+
+      {/* Hero */}
+      <main className="flex-1 flex flex-col items-center justify-center text-center px-4 relative z-10 mt-10 md:mt-0">
+        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[#22c55e]/10 border border-[#22c55e]/20 text-[#22c55e] text-[10px] font-black uppercase tracking-widest mb-6 animate-fade-in-up">
+          <span className="w-1.5 h-1.5 rounded-full bg-[#22c55e] animate-pulse" /> Enter the Arena
+        </div>
         
-        {/* Auth Navigation (Top Right) */}
-        <nav className="flex justify-end relative z-20">
-          {user ? (
-            <div className="flex flex-col items-end">
-               <button 
-                onClick={handleSignOut}
-                className="px-5 py-2 text-xs font-bold bg-green-500 text-black rounded-full hover:bg-green-400 transition-colors shadow-lg"
-              >
-                Sign Out
-              </button>
-            </div>
-          ) : (
-            <Link 
-              href="/login" 
-              className="px-6 py-2.5 text-sm font-bold bg-white text-gray-900 rounded-full hover:bg-green-400 hover:text-black transition-colors shadow-lg"
-            >
-              Log In
-            </Link>
-          )}
-        </nav>
-
-        {/* Centered Logo (Positioned below the Nav row) */}
-        <div className="mt-8 flex flex-col items-center leading-none select-none">
-          <span className="text-5xl md:text-5xl font-black tracking-tighter text-green-400">INVICTUS</span>
-          <span className="text-lg md:text-3xl font-bold tracking-[0.2em] text-white mt-1 md:mt-0">SPORTS</span>
-        </div>
-      </header>
-
-      {/* --- HERO SECTION --- */}
-      <section className="px-6 py-2 text-center max-w-4xl mx-auto">
-        <div className="inline-block px-3 py-1 mb-6 border border-green-400/30 rounded-full bg-green-400/10 text-green-300 text-xs font-bold uppercase tracking-widest">
-          The New Standard
-        </div>
-        <h1 className="text-5xl md:text-7xl font-black mb-8 leading-tight">
-          Fantasy Sports. <br />
-          <span className="text-transparent bg-clip-text bg-gradient-to-r from-green-400 to-green-200">
-            Unleashed.
-          </span>
-        </h1>
-        <p className="text-lg md:text-xl text-gray-400 mb-10 max-w-2xl mx-auto">
-          Experience the next generation of league management. Real-time stats, 
-          deep dynasty customization putting the power in the players. Play how you want to play.
+        <h2 className="text-5xl md:text-8xl font-black tracking-tighter leading-[0.9] mb-6 bg-gradient-to-b from-white to-slate-500 bg-clip-text text-transparent">
+          DOMINATE <br /> THE POSTSEASON
+        </h2>
+        
+        <p className="text-slate-400 text-sm md:text-lg max-w-md mx-auto mb-10 leading-relaxed">
+          The ultimate alternative fantasy sports platform. New ways to play.
         </p>
-        <div className="flex flex-col sm:flex-row gap-4 justify-center">
-          <Link 
-            href={user ? "/hub" : "/login"} 
-            className="px-8 py-4 bg-green-500 text-black font-bold text-lg rounded-xl hover:bg-green-400 hover:scale-105 transition-all shadow-lg shadow-green-400/20"
-          >
-            {user ? "Enter The Hub" : "Start Your Dynasty"}
+
+        <div className="flex flex-col md:flex-row gap-4 w-full max-w-sm md:max-w-md">
+          <Link href="/login" className="flex-1 bg-[#22c55e] hover:bg-[#16a34a] text-[#020617] py-4 rounded-xl font-black text-sm uppercase tracking-widest flex items-center justify-center gap-2 transition-all transform hover:scale-[1.02]">
+            Get Started <ArrowRight size={16} />
           </Link>
-          <a 
-            href="#features" 
-            className="px-8 py-4 bg-gray-800 text-white font-bold text-lg rounded-xl hover:bg-gray-700 transition-all border border-gray-700"
-          >
-            View Features
-          </a>
+          <Link href="/hub" className="flex-1 bg-slate-900 border border-slate-700 hover:border-slate-500 text-white py-4 rounded-xl font-black text-sm uppercase tracking-widest transition-all">
+            Enter Hub
+          </Link>
         </div>
-      </section>
+      </main>
 
-      {/* --- FEATURE GRID --- */}
-      <section id="features" className="bg-black py-24">
-        <div className="max-w-7xl mx-auto px-6">
-          <div className="text-center mb-16">
-            <h2 className="text-3xl md:text-4xl font-bold mb-4">Built for the Commish</h2>
-            <p className="text-gray-400">Everything you need to run a professional league.</p>
-          </div>
-
-          <div className="grid md:grid-cols-3 gap-8">
-            <div className="p-8 bg-gray-900 rounded-2xl border border-gray-800 hover:border-green-400/50 transition-colors">
-              <div className="w-12 h-12 bg-green-400/10 text-green-400 rounded-lg flex items-center justify-center mb-6 text-2xl">⚡</div>
-              <h3 className="text-xl font-bold mb-3">Daily Scoring</h3>
-              <p className="text-gray-400 leading-relaxed">
-                Powered by Tank01 APIs Daily.
-              </p>
-            </div>
-
-            <div className="p-8 bg-gray-900 rounded-2xl border border-gray-800 hover:border-green-400/50 transition-colors">
-              <div className="w-12 h-12 bg-green-400/10 text-green-400 rounded-lg flex items-center justify-center mb-6 text-2xl">🛡️</div>
-              <h3 className="text-xl font-bold mb-3">Dynasty Focus</h3>
-              <p className="text-gray-400 leading-relaxed">
-                Built for the long haul. Our goal is to change the way we play fantasy sports introducing new ways to compete.
-              </p>
-            </div>
-
-            <div className="p-8 bg-gray-900 rounded-2xl border border-gray-800 hover:border-green-400/50 transition-colors">
-              <div className="w-12 h-12 bg-green-400/10 text-green-400 rounded-lg flex items-center justify-center mb-6 text-2xl">💰</div>
-              <h3 className="text-xl font-bold mb-3">Prop Bets & Lines</h3>
-              <p className="text-gray-400 leading-relaxed">
-                Integrated betting lines and player props right in your dashboard. 
-                Coming Soon...
-              </p>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* --- BLOG SECTION --- */}
-      <section className="py-24 max-w-7xl mx-auto px-6">
-        <h2 className="text-3xl font-bold mb-10 border-l-4 border-green-400 pl-4">Latest Analysis</h2>
+{/* Features Grid - Mobile Stack */}
+      <section className="relative z-10 max-w-6xl mx-auto w-full px-6 py-20 flex flex-col items-center gap-12">
         
-        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
-          <article className="group cursor-pointer">
-            <div className="h-48 bg-gray-800 rounded-xl mb-4 overflow-hidden relative">
-              <div className="absolute inset-0 bg-gray-700 group-hover:bg-gray-600 transition-colors flex items-center justify-center text-gray-500 font-bold">
-                [Image: Week 19 QB Rankings]
-              </div>
-            </div>
-            <span className="text-green-400 text-xs font-bold uppercase tracking-wider">Strategy</span>
-            <h3 className="text-xl font-bold mt-2 group-hover:text-green-400 transition-colors">
-              Wildcard Weekend: The QB Dilemma
+        {/* NEW HEADER */}
+        <div className="text-center space-y-2">
+            <h3 className="text-2xl md:text-3xl font-black uppercase tracking-[0.2em] text-white">
+                Coming Soon
             </h3>
-            <p className="text-gray-400 text-sm mt-2">
-              Why trusting the rookie quarterbacks this weekend might be the edge you need in DFS tournaments.
-            </p>
-          </article>
+            <div className="w-12 h-1 bg-[#22c55e] mx-auto rounded-full" />
+        </div>
 
-          <article className="group cursor-pointer">
-            <div className="h-48 bg-gray-800 rounded-xl mb-4 overflow-hidden relative">
-              <div className="absolute inset-0 bg-gray-700 group-hover:bg-gray-600 transition-colors flex items-center justify-center text-gray-500 font-bold">
-                [Image: Sleepers]
+        {/* THE GRID */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full">
+            {[
+              { icon: Trophy, title: "Power to the Player", desc: "Make 'alternative' just a stepping stone when we bring custom league settings in a future release." },
+              { icon: Shield, title: "More sports and more ways to play!", desc: "We're not stopping at just football. We plan on bringing new ways to play to March Madness, The Masters, The World Cup and many more." },
+              { icon: Users, title: "Global Leaderboards", desc: "Dominated your league? How did you stack up against everyone else?" }
+            ].map((feat, i) => (
+              <div key={i} className="bg-slate-900/50 border border-slate-800 p-6 rounded-2xl backdrop-blur-sm hover:border-[#22c55e]/30 transition-colors group">
+                <div className="bg-slate-950 w-12 h-12 rounded-xl flex items-center justify-center border border-slate-800 group-hover:border-[#22c55e]/50 transition-colors mb-4">
+                    <feat.icon className="text-[#22c55e]" size={20} />
+                </div>
+                <h3 className="font-bold text-white mb-2 uppercase tracking-wide text-sm">{feat.title}</h3>
+                <p className="text-xs text-slate-500 leading-relaxed font-medium">{feat.desc}</p>
               </div>
-            </div>
-            <span className="text-green-400 text-xs font-bold uppercase tracking-wider">Sleepers</span>
-            <h3 className="text-xl font-bold mt-2 group-hover:text-green-400 transition-colors">
-              Hidden Gems in the AFC South
-            </h3>
-            <p className="text-gray-400 text-sm mt-2">
-              Three wide receivers rostered in less than 5% of leagues that could break out in 2026.
-            </p>
-          </article>
-
-           <div className="h-full min-h-[300px] bg-gray-800/50 border border-dashed border-gray-700 rounded-xl flex items-center justify-center flex-col text-center p-6">
-              <span className="text-gray-500 font-mono text-sm mb-2">Advertisement</span>
-              <p className="text-gray-600 text-sm">
-                (Google AdSense Space <br/> 300x250)
-              </p>
-           </div>
+            ))}
         </div>
       </section>
 
-      {/* --- FOOTER --- */}
-      <footer className="border-t border-gray-800 py-12 text-center text-gray-500 text-sm">
-        <p>&copy; 2026 Invictus Sports. All rights reserved.</p>
-        <div className="flex justify-center gap-6 mt-4">
-          <Link href="/login" className="hover:text-white">Login</Link>
-          <span className="hover:text-white cursor-pointer">Privacy Policy</span>
-          <span className="hover:text-white cursor-pointer">Terms of Service</span>
-        </div>
-      </footer>
     </div>
   );
 }
