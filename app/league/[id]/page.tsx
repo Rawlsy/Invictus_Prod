@@ -1,11 +1,12 @@
 ﻿'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { doc, setDoc, onSnapshot, collection, getDocs } from 'firebase/firestore'; 
-import { onAuthStateChanged } from 'firebase/auth'; 
+// FIXED: Added 'documentId' back to the imports
+import { doc, setDoc, updateDoc, deleteField, onSnapshot, collection, getDocs, query, where, documentId, limit, orderBy } from 'firebase/firestore'; 
+import { onAuthStateChanged, User } from 'firebase/auth'; 
 import { db, auth } from '@/lib/firebase'; 
-import { Lock, Search } from 'lucide-react'; 
+import { Lock, Search, ChevronLeft, Trash2, AlertCircle, CalendarClock, Trophy } from 'lucide-react'; 
 
 const DB_LINEUP_KEYS = {
   wildcard: "Wild Card Lineup",
@@ -21,11 +22,24 @@ const ROUND_TO_DB_MAP = {
   superbowl: "Superbowl"
 };
 
+const ROUND_TO_WEEK_NUM = {
+  wildcard: "19",
+  divisional: "20",
+  conference: "21",
+  superbowl: "22"
+};
+
 const ROUND_TO_WEEK_PATH = {
   wildcard: "Week 19",
   divisional: "Week 20",
   conference: "Week 21",
   superbowl: "Week 22"
+};
+
+const SCORING_KEYS: Record<string, { proj: string, act: string, label: string }> = {
+    "PPR": { proj: "Projected PPR", act: "PPR", label: "PPR" },
+    "Half-PPR": { proj: "Projected Half PPR", act: "Half", label: "Half" },
+    "Standard": { proj: "Projected Standard", act: "Standard", label: "Std" }
 };
 
 const POSITIONS = [
@@ -44,98 +58,263 @@ export default function LeaguePage() {
   const params = useParams();
   const router = useRouter(); 
   
+  const [authUser, setAuthUser] = useState<User | null>(null); 
   const [userId, setUserId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState('Selections');
-  const [activeRound, setActiveRound] = useState<keyof typeof ROUND_TO_DB_MAP>('divisional');
+  const [activeRound, setActiveRound] = useState<keyof typeof ROUND_TO_DB_MAP>('wildcard');
   
   const [games, setGames] = useState<any[]>([]);
-  const [availablePlayers, setAvailablePlayers] = useState<any[]>([]);
+  const [modalPlayers, setModalPlayers] = useState<any[]>([]); 
   const [lineup, setLineup] = useState<Record<string, any>>({}); 
+  
+  const [previouslySelectedIds, setPreviouslySelectedIds] = useState<Set<string>>(new Set());
+  const [currentRoundIds, setCurrentRoundIds] = useState<Set<string>>(new Set());
+  
+  const [systemWeek, setSystemWeek] = useState<string | null>(null);
+  
+  const [leagueName, setLeagueName] = useState("Loading...");
+  const [leagueScoring, setLeagueScoring] = useState("PPR"); 
+
   const [leaderboard, setLeaderboard] = useState<any[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedSlot, setSelectedSlot] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [isLoadingLineup, setIsLoadingLineup] = useState(false);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
-      if (user) setUserId(user.uid);
+      if (user) {
+          setAuthUser(user);
+          setUserId(user.uid);
+      }
       else router.push('/login');
     });
     return () => unsubscribe();
   }, [router]);
 
+  // 0. FETCH SYSTEM WEEK
   useEffect(() => {
-    const fetchData = async () => {
+    const sysRef = doc(db, 'system', 'nfl_state');
+    const unsubscribe = onSnapshot(sysRef, (docSnap) => {
+        if (docSnap.exists()) {
+            const currentWeek = docSnap.data().currentWeek || '19';
+            setSystemWeek(currentWeek);
+            const matchingRound = Object.keys(ROUND_TO_WEEK_NUM).find(
+                key => ROUND_TO_WEEK_NUM[key as keyof typeof ROUND_TO_WEEK_NUM] === currentWeek
+            );
+            if (matchingRound) setActiveRound(matchingRound as keyof typeof ROUND_TO_DB_MAP);
+        } else {
+            setSystemWeek('19');
+            setActiveRound('wildcard');
+        }
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // FETCH LEAGUE DETAILS
+  useEffect(() => {
+    if (!params.id) return;
+    const leagueDocRef = doc(db, 'leagues', params.id as string);
+    const unsubscribe = onSnapshot(leagueDocRef, (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        setLeagueName(data.name || "Untitled League");
+        let scoreType = data.scoringType || data.scoring || "PPR";
+        if (scoreType === "Half PPR") scoreType = "Half-PPR"; 
+        setLeagueScoring(scoreType); 
+      } else {
+        setLeagueName("League Not Found");
+      }
+    });
+    return () => unsubscribe();
+  }, [params.id]);
+
+  // 1. FETCH GAMES
+  useEffect(() => {
+    const fetchGames = async () => {
       try {
         const weekSubPath = ROUND_TO_WEEK_PATH[activeRound];
         const gamesRef = collection(db, 'Games Scheduled', 'Weeks', weekSubPath);
         const gamesSnap = await getDocs(gamesRef);
         setGames(gamesSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-
-        const playersRef = collection(db, 'players');
-        const playersSnap = await getDocs(playersRef);
-        setAvailablePlayers(playersSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
       } catch (err) { console.error("Fetch error:", err); }
     };
-    fetchData();
+    fetchGames();
   }, [activeRound]);
 
+  // 2. FETCH LEADERBOARD
   useEffect(() => {
     if (!params.id) return;
     const membersRef = collection(db, 'leagues', params.id as string, 'Members');
-    const unsubscribe = onSnapshot(membersRef, (snapshot) => {
-      const members = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      const sorted = members.sort((a, b) => (b.scores?.Total || 0) - (a.scores?.Total || 0));
-      setLeaderboard(sorted);
+    const q = query(membersRef, limit(100)); 
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const rawMembers = snapshot.docs.map(doc => ({ 
+          id: doc.id, 
+          ...doc.data() 
+      }));
+
+      const sortedMembers = rawMembers.sort((a: any, b: any) => {
+          const scoreA = a.scores?.Total || 0;
+          const scoreB = b.scores?.Total || 0;
+          return scoreB - scoreA;
+      });
+
+      const rankedMembers = sortedMembers.map((m, index) => ({
+          ...m,
+          rank: index + 1
+      }));
+
+      setLeaderboard(rankedMembers);
     });
     return () => unsubscribe();
   }, [params.id]);
 
+  // 3. FETCH LINEUP
   useEffect(() => {
-    if (!userId || !params.id || availablePlayers.length === 0) return;
+    if (!userId || !params.id) return;
+    
     const memberRef = doc(db, 'leagues', params.id as string, 'Members', userId);
-    const unsubscribe = onSnapshot(memberRef, (docSnap) => {
+    
+    const unsubscribe = onSnapshot(memberRef, async (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
-        const dbKey = DB_LINEUP_KEYS[activeRound];
-        const savedLineup = data[dbKey] || {};
-        const hydrated: Record<string, any> = {};
+        const currentDbKey = DB_LINEUP_KEYS[activeRound];
+        const currentRoundLineup = data[currentDbKey] || {};
         
-        Object.keys(savedLineup).forEach(slot => {
-          const p = availablePlayers.find(player => player.id === savedLineup[slot]);
-          if (p) hydrated[slot] = p;
+        const prevIds = new Set<string>();
+        Object.keys(DB_LINEUP_KEYS).forEach(roundKey => {
+            if (roundKey === activeRound) return;
+            const dbKey = DB_LINEUP_KEYS[roundKey as keyof typeof DB_LINEUP_KEYS];
+            const roundData = data[dbKey] || {};
+            Object.values(roundData).forEach((pid: any) => {
+                if (typeof pid === 'string' && pid) prevIds.add(pid);
+            });
         });
-        setLineup(hydrated);
+        setPreviouslySelectedIds(prevIds);
+
+        const currIds = new Set<string>();
+        Object.values(currentRoundLineup).forEach((pid: any) => {
+             if (typeof pid === 'string' && pid) currIds.add(pid);
+        });
+        setCurrentRoundIds(currIds);
+
+        const playerIdsToFetch = Object.values(currentRoundLineup).filter(id => typeof id === 'string' && id.length > 0) as string[];
+
+        if (playerIdsToFetch.length === 0) {
+            setLineup({});
+            return;
+        }
+
+        try {
+            setIsLoadingLineup(true);
+            const playersRef = collection(db, 'players');
+            // FIXED: documentId() is now correctly imported
+            const q = query(playersRef, where(documentId(), 'in', playerIdsToFetch));
+            const querySnapshot = await getDocs(q);
+            
+            const fetchedPlayers = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            
+            const hydrated: Record<string, any> = {};
+            Object.keys(currentRoundLineup).forEach(slot => {
+                const pid = currentRoundLineup[slot];
+                const playerObj = fetchedPlayers.find(p => p.id === pid);
+                if (playerObj) hydrated[slot] = playerObj;
+            });
+            
+            setLineup(hydrated);
+        } catch (error) {
+            console.error("Error hydrating lineup:", error);
+        } finally {
+            setIsLoadingLineup(false);
+        }
       }
     });
     return () => unsubscribe();
-  }, [activeRound, params.id, userId, availablePlayers]);
+  }, [activeRound, params.id, userId]);
 
+  // FIX: AUTO-UPDATE USERNAME IF MISSING
+  useEffect(() => {
+    if (!userId || !params.id || leaderboard.length === 0 || !authUser) return;
+
+    const myEntry = leaderboard.find(m => m.id === userId);
+    
+    // If I exist in leaderboard BUT my username is missing
+    if (myEntry && !myEntry.username) {
+        const displayName = authUser.displayName || authUser.email?.split('@')[0] || 'Anonymous Member';
+        console.log("Fixing missing username for:", userId, "->", displayName);
+        
+        const memberRef = doc(db, 'leagues', params.id as string, 'Members', userId);
+        updateDoc(memberRef, { username: displayName }).catch(err => console.error("Failed to auto-fix username", err));
+    }
+  }, [userId, leaderboard, params.id, authUser]);
+
+  // 4. FETCH MODAL PLAYERS
+  const fetchPlayersForSlot = useCallback(async (slot: string) => {
+    setModalPlayers([]); 
+    const requiredPos = slot.replace(/[0-9]/g, ''); 
+    
+    try {
+        const playersRef = collection(db, 'players');
+        let q;
+        const scoringKeys = SCORING_KEYS[leagueScoring] || SCORING_KEYS['PPR'];
+        const sortField = `${ROUND_TO_DB_MAP[activeRound]}.${scoringKeys.proj}`;
+
+        if (requiredPos === 'FLEX') {
+             q = query(playersRef, where('position', 'in', ['RB', 'WR', 'TE']), orderBy(sortField, 'desc'), limit(100)); 
+        } else if (requiredPos === 'DEF') {
+             q = query(playersRef, where('position', '==', 'DEF'), orderBy(sortField, 'desc'), limit(50));
+        } else if (requiredPos === 'K') {
+             q = query(playersRef, where('position', '==', 'K'), orderBy(sortField, 'desc'), limit(50));
+        } else {
+             q = query(playersRef, where('position', '==', requiredPos), orderBy(sortField, 'desc'), limit(50));
+        }
+
+        const snapshot = await getDocs(q);
+        const players = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        setModalPlayers(players);
+
+    } catch (err) {
+        console.error("Error fetching candidates:", err);
+    }
+  }, [activeRound, leagueScoring]); 
+
+  useEffect(() => {
+      if (isModalOpen && selectedSlot) {
+          fetchPlayersForSlot(selectedSlot);
+      }
+  }, [isModalOpen, selectedSlot, fetchPlayersForSlot]);
+
+  // Helpers
   const formatApiDate = (dateStr: string) => {
     if (!dateStr || dateStr.length !== 8) return dateStr;
-    return `${parseInt(dateStr.substring(4, 6))}/${parseInt(dateStr.substring(6, 8))}`;
+    return `${dateStr.substring(4, 6)}/${dateStr.substring(6, 8)}`;
+  };
+
+  const getRoundStatus = (roundKey: string) => {
+    if (!systemWeek) return 'loading';
+    const roundWeekNum = Number(ROUND_TO_WEEK_NUM[roundKey as keyof typeof ROUND_TO_WEEK_NUM]);
+    const currentWeekNum = Number(systemWeek);
+
+    if (roundWeekNum < currentWeekNum) return 'past'; 
+    if (roundWeekNum > currentWeekNum) return 'future'; 
+    return 'active'; 
   };
 
   const isRoundLocked = () => {
-    if (activeRound !== 'divisional') return true; 
-    if (games.length === 0) return false;
-    const startTimes = games.map(g => {
-        const yr = g.Date.substring(0, 4);
-        const mo = g.Date.substring(4, 6);
-        const dy = g.Date.substring(6, 8);
-        return new Date(`${yr}-${mo}-${dy}T${g.Time}`).getTime();
-    });
-    return new Date().getTime() > Math.min(...startTimes);
+     return getRoundStatus(activeRound) !== 'active';
   };
 
-  const getPlayerProjPPR = (p: any) => {
+  const getPlayerProj = (p: any) => {
     const roundData = p[ROUND_TO_DB_MAP[activeRound]];
-    return roundData ? Number(roundData["Projected PPR"] || 0) : 0;
+    const keys = SCORING_KEYS[leagueScoring] || SCORING_KEYS['PPR'];
+    return roundData ? Number(roundData[keys.proj] || 0) : 0;
   };
 
   const getPlayerActual = (p: any) => {
     const roundData = p[ROUND_TO_DB_MAP[activeRound]];
-    return roundData ? Number(roundData["PPR"] || 0) : 0;
+    const keys = SCORING_KEYS[leagueScoring] || SCORING_KEYS['PPR'];
+    return roundData ? Number(roundData[keys.act] || 0) : 0;
   };
 
   const getMatchupInfo = (playerTeam: string) => {
@@ -148,197 +327,317 @@ export default function LeaguePage() {
     };
   };
 
-  // FILTER LOGIC: Specifically handles DEF position and search
   const filteredPlayersList = useMemo(() => {
-    if (!selectedSlot) return [];
-    const requiredPos = selectedSlot.replace(/[0-9]/g, '');
-    const dbRoundKey = ROUND_TO_DB_MAP[activeRound];
+    const activeTeams = new Set<string>();
+    games.forEach(g => {
+      if (g['Home Team']) activeTeams.add(g['Home Team']);
+      if (g['Away Team']) activeTeams.add(g['Away Team']);
+    });
     
-    return availablePlayers
+    return modalPlayers
       .filter(p => {
-        const pPos = (p.position || p.pos || p.Position || "").toUpperCase();
-        
-        // Exact match logic for QB, RB, WR, TE, K, and DEF
-        let posMatch = false;
-        if (requiredPos === 'FLEX') {
-          posMatch = ['RB', 'WR', 'TE'].includes(pPos);
-        } else if (requiredPos === 'DEF') {
-          posMatch = pPos === 'DEF';
-        } else {
-          posMatch = pPos === requiredPos;
-        }
-
+        const pTeam = p.team || p.Team;
+        const teamMatch = activeTeams.has(pTeam);
         const name = (p.name || p.longName || p.Name || "").toLowerCase();
-        return posMatch && p[dbRoundKey]?.Active === true && name.includes(searchTerm.toLowerCase());
+        const searchMatch = name.includes(searchTerm.toLowerCase());
+        return teamMatch && searchMatch;
       })
-      .sort((a, b) => getPlayerProjPPR(b) - getPlayerProjPPR(a));
-  }, [availablePlayers, selectedSlot, activeRound, searchTerm]);
+      .sort((a, b) => getPlayerProj(b) - getPlayerProj(a)); 
+  }, [modalPlayers, searchTerm, games, activeRound, leagueScoring]);
 
   const handleSelectPlayer = async (player: any) => {
+    if (previouslySelectedIds.has(player.id)) return;
+    if (currentRoundIds.has(player.id) && lineup[selectedSlot!]?.id !== player.id) return;
     if (!selectedSlot || !userId || isRoundLocked()) return;
+
     const dbKey = DB_LINEUP_KEYS[activeRound];
     const memberRef = doc(db, 'leagues', params.id as string, 'Members', userId);
     try {
+      setLineup(prev => ({ ...prev, [selectedSlot]: player }));
       await setDoc(memberRef, { [dbKey]: { [selectedSlot]: player.id } }, { merge: true });
       setIsModalOpen(false);
       setSearchTerm('');
     } catch (err) { console.error("Save error:", err); }
   };
 
+  const handleRemovePlayer = async (slotId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!userId || isRoundLocked()) return;
+    const dbKey = DB_LINEUP_KEYS[activeRound];
+    const memberRef = doc(db, 'leagues', params.id as string, 'Members', userId);
+    try {
+        const newLineup = { ...lineup };
+        delete newLineup[slotId];
+        setLineup(newLineup);
+        await updateDoc(memberRef, {
+            [`${dbKey}.${slotId}`]: deleteField()
+        });
+    } catch (err) {
+        console.error("Remove error:", err);
+    }
+  };
+
+  const scoringLabel = (SCORING_KEYS[leagueScoring] || SCORING_KEYS['PPR']).label;
+
+  const roundTotals = useMemo(() => {
+    let totalAct = 0;
+    let totalProj = 0;
+    Object.values(lineup).forEach((p: any) => {
+        if (p) {
+            totalAct += getPlayerActual(p);
+            totalProj += getPlayerProj(p);
+        }
+    });
+    return {
+        actual: totalAct.toFixed(2),
+        projected: totalProj.toFixed(2)
+    };
+  }, [lineup, activeRound, leagueScoring]);
+
+  // LEADERBOARD CALCULATIONS
+  const topUsers = useMemo(() => leaderboard.slice(0, 20), [leaderboard]);
+  const currentUserData = useMemo(() => leaderboard.find(u => u.id === userId), [leaderboard, userId]);
+  const isUserInTop = useMemo(() => topUsers.some(u => u.id === userId), [topUsers, userId]);
+
+  // HELPER: Get Display Name (Fallback to local Auth if DB is empty)
+  const getUserDisplayName = (user: any) => {
+      if (user.username) return user.username;
+      if (user.id === userId && authUser) {
+          return authUser.displayName || authUser.email?.split('@')[0] || 'Me';
+      }
+      return 'Unknown';
+  };
+
   return (
-    <div className="pb-20 bg-gray-950 min-h-screen">
-      <div className="bg-gray-900/50 border-b border-gray-800 px-6 sticky top-0 z-40 backdrop-blur-md">
-        <div className="max-w-7xl mx-auto flex space-x-10">
-          {['Selections', 'Leaderboard', 'Rules'].map(tab => (
-            <button key={tab} onClick={() => setActiveTab(tab)} className={`py-4 text-[10px] font-black uppercase tracking-widest border-b-2 transition-all ${activeTab === tab ? 'border-green-500 text-green-500' : 'border-transparent text-gray-500 hover:text-white'}`}>{tab}</button>
-          ))}
-        </div>
+    <div className="relative pb-20 bg-[#020617] min-h-screen text-white font-sans overflow-x-hidden">
+      
+      <div className="fixed inset-0 z-0 pointer-events-none">
+        <div className="absolute inset-0 opacity-[0.05]" style={{ backgroundImage: `linear-gradient(#334155 1px, transparent 1px), linear-gradient(90deg, #334155 1px, transparent 1px)`, backgroundSize: '40px 40px' }} />
+        <div className="absolute top-0 left-0 w-full h-[40vh] bg-gradient-to-b from-[#22c55e]/5 to-transparent animate-scan opacity-30" />
       </div>
 
-      <main className="max-w-5xl mx-auto px-4 mt-8 space-y-10">
-        {activeTab === 'Selections' && (
-          <>
-            <div className="grid grid-cols-4 gap-2 bg-gray-900 p-1.5 rounded-2xl border border-gray-800">
-              {Object.keys(ROUND_TO_DB_MAP).map(r => {
-                const isLocked = r !== 'divisional';
-                return (
-                  <button key={r} onClick={() => setActiveRound(r as any)} className={`relative py-2.5 text-[10px] font-black rounded-xl transition-all uppercase tracking-widest flex items-center justify-center space-x-2 ${activeRound === r ? 'bg-blue-600 text-white shadow-2xl' : 'text-gray-500 hover:bg-gray-800'}`}>
-                    <span>{r}</span>
-                    {isLocked && <Lock size={10} className="text-gray-600" />}
-                  </button>
-                );
-              })}
-            </div>
+      <style jsx global>{`
+        @keyframes scan { 0% { transform: translateY(-100%); } 100% { transform: translateY(300%); } }
+        .animate-scan { animation: scan 12s linear infinite; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+      `}</style>
 
-            <div className="space-y-4">
-              <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-gray-600 px-1 text-center">Playoff Schedule</h3>
-              <div className="flex space-x-3 overflow-x-auto pb-4 no-scrollbar scroll-smooth">
-                {games.map((game) => {
-                  const isCompleted = game.gameStatus === 'Completed' || game.gameStatus === 'Final';
-                  const awayS = Number(game.awayScore || 0);
-                  const homeS = Number(game.homeScore || 0);
-                  return (
-                    <div key={game.id} className={`min-w-[180px] p-4 bg-gray-900 border ${isCompleted ? 'border-green-500/20 shadow-inner' : 'border-gray-800'} rounded-2xl shrink-0 flex flex-col items-center justify-center text-center transition-all hover:border-gray-700`}>
-                      <span className={`text-[8px] font-black mb-2 uppercase tracking-widest ${isCompleted ? 'text-green-500' : 'text-gray-500'}`}>{isCompleted ? 'Final' : `${formatApiDate(game.Date)} • ${game.Time}`}</span>
-                      <div className="flex items-center w-full justify-around space-x-2">
-                        <div className="flex flex-col items-center">
-                          <span className={`text-[10px] font-black uppercase tracking-tighter ${isCompleted && awayS > homeS ? 'text-green-500' : 'text-white'}`}>{game['Away Team']}</span>
-                          {isCompleted && <span className={`text-xs font-black mt-1 ${awayS > homeS ? 'text-green-500' : 'text-white'}`}>{game.awayScore || 0}</span>}
-                        </div>
-                        <span className="text-[8px] font-bold text-gray-800">@</span>
-                        <div className="flex flex-col items-center">
-                          <span className={`text-[10px] font-black uppercase tracking-tighter ${isCompleted && homeS > awayS ? 'text-green-500' : 'text-white'}`}>{game['Home Team']}</span>
-                          {isCompleted && <span className={`text-xs font-black mt-1 ${homeS > awayS ? 'text-green-500' : 'text-white'}`}>{game.homeScore || 0}</span>}
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
+      <div className="relative z-10">
+        <div className="bg-[#020617]/90 backdrop-blur-xl px-4 md:px-8 py-4 flex items-center justify-between border-b border-[#334155]/40 sticky top-0 z-50">
+          <h1 className="text-xl md:text-2xl font-black italic tracking-tighter text-white uppercase">INVICTUS<span className="text-[#22c55e]">SPORTS</span></h1>
+        </div>
 
-            <div className="bg-gray-900 rounded-2xl border-t-4 border-green-500 shadow-2xl divide-y divide-gray-800 overflow-hidden">
-               <div className="px-8 py-4 bg-gray-900 flex justify-between items-center border-b border-gray-800">
-                  <h2 className="text-xs font-black uppercase tracking-[0.15em] text-gray-400">Your {activeRound} Lineup</h2>
-                  {isRoundLocked() ? (
-                    <span className="text-red-500 text-[9px] font-black border border-red-500/20 px-2.5 py-1 rounded bg-red-500/5 uppercase">Locked</span>
-                  ) : (
-                    <span className="text-green-500 text-[9px] font-black border border-green-500/20 px-2.5 py-1 rounded bg-green-500/10 uppercase">Open</span>
-                  )}
-               </div>
-               {POSITIONS.map(pos => {
-                const p = lineup[pos.id];
-                const locked = isRoundLocked();
-                return (
-                  <div key={pos.id} onClick={() => !locked && (setSelectedSlot(pos.id), setIsModalOpen(true))} className={`px-8 py-6 flex items-center transition-all ${!locked ? 'cursor-pointer hover:bg-gray-800/50' : 'opacity-60'}`}>
-                    <div className="w-14"><span className="px-2.5 py-1.5 bg-gray-800 text-[9px] font-black rounded uppercase border border-gray-700">{pos.label}</span></div>
-                    <div className="flex-1 ml-6">
-                      {p ? (
-                        <div>
-                          <div className="text-base font-serif italic font-black text-white uppercase tracking-tight leading-none">
-                            {p.name || p.longName || p.Name}
-                          </div>
-                          <div className="text-[10px] text-gray-500 font-bold uppercase tracking-widest mt-1.5">
-                            <span className="text-white font-black">{p.team || p.Team}</span> • {getMatchupInfo(p.team || p.Team).opponent}
-                          </div>
-                        </div>
-                      ) : <div className="text-xs text-gray-600 italic font-bold uppercase tracking-widest">Select Player</div>}
-                    </div>
-                    <div className="text-right font-black text-xl text-white tracking-tighter tabular-nums">{p ? getPlayerActual(p).toFixed(1) : '-'}</div>
-                  </div>
-                );
-              })}
-            </div>
-          </>
-        )}
-
-        {activeTab === 'Leaderboard' && (
-          <div className="bg-gray-900 rounded-2xl border border-gray-800 shadow-2xl overflow-hidden">
-            <div className="px-8 py-5 border-b border-gray-800"><h2 className="text-xs font-black uppercase tracking-[0.2em] text-green-500">Standings</h2></div>
-            <div className="divide-y divide-gray-800">
-              {leaderboard.map((member, index) => (
-                <div key={member.id} className={`flex items-center px-8 py-6 transition-all ${member.id === userId ? 'bg-blue-600/5 border-l-4 border-blue-600' : 'hover:bg-gray-800/30'}`}>
-                  <div className="w-10 text-center"><span className={`text-xl font-black ${index === 0 ? 'text-yellow-400' : index === 1 ? 'text-gray-300' : index === 2 ? 'text-orange-400' : 'text-gray-600'}`}>{index + 1}</span></div>
-                  <div className="flex-1 ml-6">
-                    <span className="font-black text-white uppercase tracking-tight text-sm">{member.displayName || member.username || "Member"}</span>
-                    {member.id === userId && <span className="ml-3 text-[8px] bg-blue-600 text-white px-2 py-0.5 rounded-full font-black uppercase">You</span>}
-                  </div>
-                  <div className="text-right"><div className="text-2xl font-black text-white tracking-tighter tabular-nums">{(member.scores?.Total || 0).toFixed(1)}</div></div>
-                </div>
-              ))}
+        <main className="max-w-[1400px] mx-auto px-2 md:px-8 py-6 space-y-8">
+          
+          <div className="space-y-4 px-2">
+            <button onClick={() => router.back()} className="flex items-center text-[10px] font-bold text-slate-400 uppercase tracking-widest gap-1 hover:text-white transition-colors">
+              <ChevronLeft size={14} /> BACK TO HUB
+            </button>
+            <div className="flex items-center justify-between">
+              <h2 className="text-2xl md:text-4xl font-black uppercase tracking-tight">{leagueName}</h2>
+              <span className="bg-[#064e3b] text-[#22c55e] px-3 py-1 rounded-md text-xs font-black uppercase tracking-widest border border-[#22c55e]/20">{leagueScoring}</span>
             </div>
           </div>
-        )}
-      </main>
 
-      {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/95 p-4 backdrop-blur-xl">
-          <div className="bg-gray-900 w-full max-w-xl rounded-[2rem] flex flex-col max-h-[85vh] border border-gray-800 shadow-2xl overflow-hidden">
-            <div className="px-8 py-6 border-b border-gray-800 bg-gray-900/50">
-              <div className="flex justify-between items-center mb-4">
-                <h3 className="font-black text-white uppercase tracking-widest text-[10px] text-blue-500">Select {selectedSlot}</h3>
-                <button onClick={() => setIsModalOpen(false)} className="text-gray-500 hover:text-white transition-colors">✕</button>
+          <div className="flex border-b border-slate-800 overflow-x-auto no-scrollbar px-2">
+            {['Selections', 'Leaderboard', 'Rules'].map(tab => (
+              <button key={tab} onClick={() => setActiveTab(tab)} className={`py-3 px-6 text-sm font-bold tracking-tight transition-all border-b-2 whitespace-nowrap ${activeTab === tab ? 'border-[#22c55e] text-[#22c55e]' : 'border-transparent text-slate-500 hover:text-white'}`}>{tab}</button>
+            ))}
+          </div>
+
+          {activeTab === 'Selections' && (
+            <div className="space-y-10">
+              <div className="flex bg-slate-900/80 backdrop-blur-md p-1.5 rounded-xl border border-slate-700 shadow-xl mx-2">
+                {Object.keys(ROUND_TO_DB_MAP).map(r => {
+                    const status = getRoundStatus(r);
+                    const isActive = activeRound === r;
+                    const isLocked = status !== 'active';
+                    let statusColor = 'text-gray-500 hover:text-white';
+                    if (isActive) statusColor = 'bg-blue-600 text-white shadow-lg scale-[1.02]';
+                    else if (status === 'active') statusColor = 'text-[#22c55e] hover:text-white';
+                    return (
+                        <button key={r} onClick={() => setActiveRound(r as any)} className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-lg text-[10px] md:text-xs font-black uppercase tracking-widest transition-all ${statusColor}`}>
+                            {isLocked && <Lock size={12} />} {!isLocked && isActive && <span className="w-2 h-2 rounded-full bg-[#22c55e] animate-pulse"/>} {r}
+                        </button>
+                    )
+                })}
               </div>
-              <div className="relative">
-                <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-600" size={14} />
-                <input 
-                  autoFocus
-                  placeholder="SEARCH PLAYERS..." 
-                  className="w-full bg-gray-950 border border-gray-800 rounded-xl py-3 pl-12 pr-4 text-xs font-bold text-white uppercase tracking-widest focus:border-blue-500 outline-none transition-all"
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                />
+
+              <div className="space-y-4 px-2">
+                <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-500 px-1">Live Playoff Schedule</h3>
+                <div className="flex gap-3 overflow-x-auto no-scrollbar pb-2">
+                  {games.map((game) => {
+                    const isCompleted = game.gameStatus === 'Completed' || game.gameStatus === 'Final';
+                    const isWildcard = activeRound === 'wildcard'; 
+                    const awayS = Number(game.awayScore || 0);
+                    const homeS = Number(game.homeScore || 0);
+                    return (
+                      <div key={game.id} className={`${isWildcard ? 'min-w-[170px] md:min-w-[195px] p-4' : 'min-w-[190px] md:min-w-[220px] p-5'} bg-slate-900/60 border ${isCompleted ? 'border-[#22c55e]/30' : 'border-slate-700'} rounded-2xl flex flex-col items-center gap-3 shadow-xl backdrop-blur-sm transition-all`}>
+                        <span className={`text-[9px] font-black uppercase tracking-widest ${isCompleted ? 'text-[#22c55e]' : 'text-slate-500'}`}>{isCompleted ? 'Final' : `${formatApiDate(game.Date)} • ${game.Time}`}</span>
+                        <div className="flex items-center justify-between w-full px-1">
+                          <div className="flex flex-col items-center flex-1">
+                            <span className={`${isWildcard ? 'text-[10px]' : 'text-[11px]'} font-black uppercase tracking-tighter ${isCompleted && awayS > homeS ? 'text-[#22c55e]' : 'text-white'}`}>{game['Away Team']}</span>
+                            {isCompleted && (<span className={`${isWildcard ? 'text-sm' : 'text-base'} font-black mt-1 ${awayS > homeS ? 'text-[#22c55e]' : 'text-slate-400'}`}>{awayS}</span>)}
+                          </div>
+                          <span className="text-[9px] font-bold text-slate-800 mx-1 italic">@</span>
+                          <div className="flex flex-col items-center flex-1">
+                            <span className={`${isWildcard ? 'text-[10px]' : 'text-[11px]'} font-black uppercase tracking-tighter ${isCompleted && homeS > awayS ? 'text-[#22c55e]' : 'text-white'}`}>{game['Home Team']}</span>
+                            {isCompleted && (<span className={`${isWildcard ? 'text-sm' : 'text-base'} font-black mt-1 ${homeS > awayS ? 'text-[#22c55e]' : 'text-slate-400'}`}>{homeS}</span>)}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="max-w-4xl mx-auto w-full px-2">
+                <div className="bg-slate-900/90 border-2 border-[#22c55e] rounded-[2.5rem] shadow-2xl overflow-hidden backdrop-blur-md">
+                  <div className="px-6 md:px-10 py-7 border-b border-slate-800 bg-slate-900/50 flex justify-between items-end">
+                      <div>
+                          <h3 className="text-2xl font-black uppercase tracking-tight text-white mb-1">Your Lineup</h3>
+                          <div className="flex items-center gap-2 text-[11px] font-black uppercase tracking-widest text-slate-500">
+                            Active Round <span className="text-slate-700">•</span> 
+                            {getRoundStatus(activeRound) === 'past' && <span className="text-red-500 flex items-center gap-1"><Lock size={12}/> Locked (Round Over)</span>}
+                            {getRoundStatus(activeRound) === 'future' && <span className="text-blue-400 flex items-center gap-1"><CalendarClock size={12}/> Coming Soon</span>}
+                            {getRoundStatus(activeRound) === 'active' && <span className="text-[#22c55e] flex items-center gap-1">⚡ Open for Edits</span>}
+                            {isLoadingLineup && <span className="ml-2 text-blue-400 animate-pulse">Syncing...</span>}
+                          </div>
+                      </div>
+                      <div className="text-right">
+                          <div className="text-3xl font-black text-white tracking-tighter tabular-nums">{roundTotals.actual}</div>
+                          <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Proj: <span className="text-[#22c55e]">{roundTotals.projected}</span></div>
+                      </div>
+                  </div>
+                  <div className="divide-y divide-slate-800/50">
+                    {POSITIONS.map(pos => {
+                      const p = lineup[pos.id];
+                      const locked = isRoundLocked();
+                      const matchup = p ? getMatchupInfo(p.team || p.Team) : null;
+                      return (
+                        <div key={pos.id} onClick={() => !locked && (setSelectedSlot(pos.id), setIsModalOpen(true))} className={`px-6 md:px-10 py-7 flex items-center group transition-all ${!locked ? 'cursor-pointer hover:bg-white/5' : 'opacity-60 cursor-not-allowed'}`}>
+                          <div className="w-14 h-12 bg-slate-950 rounded-xl flex items-center justify-center border border-slate-800 group-hover:border-[#22c55e]/50 transition-colors">
+                            <span className="text-xs font-black text-slate-500 group-hover:text-[#22c55e]">{pos.label}</span>
+                          </div>
+                          <div className="flex-1 ml-6 md:ml-8">
+                            {p ? (
+                              <div className="flex flex-col gap-1">
+                                <span className="text-lg md:text-xl font-bold text-white tracking-tight leading-tight">{p.name || p.longName}</span>
+                                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                                  <span className="text-white font-black">{p.team}</span><span className="text-slate-800">|</span><span>{matchup?.opponent}</span><span className="text-slate-800">|</span><span className="text-[#22c55e]">Proj: {getPlayerProj(p).toFixed(1)}</span>
+                                </div>
+                              </div>
+                            ) : (<span className="text-sm text-slate-600 font-bold uppercase tracking-[0.2em] italic">Assign {pos.name}</span>)}
+                          </div>
+                          <div className="flex items-center gap-4">
+                            <div className="text-2xl md:text-3xl font-black text-white tracking-tighter tabular-nums">{p ? getPlayerActual(p).toFixed(1) : '0.0'}</div>
+                            {p && !locked && (<button onClick={(e) => handleRemovePlayer(pos.id, e)} className="p-2 bg-slate-800/50 hover:bg-red-500/20 text-slate-500 hover:text-red-500 rounded-lg transition-all" title="Remove Player"><Trash2 size={16} /></button>)}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
               </div>
             </div>
-            
-            <div className="overflow-y-auto p-4 space-y-2 custom-scrollbar border-t border-gray-800/50">
-              {filteredPlayersList.map(p => (
-                <button 
-                  key={p.id} 
-                  onClick={() => handleSelectPlayer(p)} 
-                  className="w-full text-left p-5 hover:bg-blue-600/10 rounded-2xl flex justify-between items-center group transition-all border border-transparent hover:border-blue-500/50"
-                >
-                  <div className="flex items-center space-x-5">
-                    <div className="bg-gray-800 text-[10px] font-black w-12 h-12 flex items-center justify-center rounded-full border border-gray-700 group-hover:border-blue-500 group-hover:text-blue-500 transition-all">
-                      {p.position || p.pos || p.Position}
+          )}
+
+          {activeTab === 'Leaderboard' && (
+            <div className="max-w-5xl mx-auto w-full px-2">
+                <div className="bg-slate-900/90 border-2 border-[#22c55e] rounded-[2.5rem] shadow-2xl overflow-hidden backdrop-blur-md">
+                    <div className="px-6 md:px-10 py-7 border-b border-slate-800 bg-slate-900/50 flex justify-between items-center">
+                        <div>
+                            <h3 className="text-2xl font-black uppercase tracking-tight text-white mb-1">Leaderboard</h3>
+                            <div className="text-[11px] font-black uppercase tracking-widest text-slate-500">Top 20 Users • Sorted by Total Score</div>
+                        </div>
+                        <Trophy className="text-[#22c55e]" size={24} />
                     </div>
-                    <div>
-                      <div className="font-Georgia text-base font-black text-white uppercase tracking-tight leading-none group-hover:text-blue-400 transition-colors">
-                        {p.name || p.longName || p.Name}
-                      </div>
-                      <div className="text-[10px] text-gray-500 uppercase font-black tracking-widest mt-1.5">
-                        <span className="text-white font-black">{p.team || p.Team}</span> • {getMatchupInfo(p.team || p.Team).opponent}
-                      </div>
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-left">
+                            <thead className="bg-slate-950/50 border-b border-slate-800">
+                                <tr>
+                                    <th className="px-6 py-4 text-[10px] font-black text-slate-500 uppercase tracking-widest w-16">Rank</th>
+                                    <th className="px-4 py-4 text-[10px] font-black text-slate-500 uppercase tracking-widest">User</th>
+                                    <th className="px-4 py-4 text-[10px] font-black text-slate-500 uppercase tracking-widest text-right">WC</th>
+                                    <th className="px-4 py-4 text-[10px] font-black text-slate-500 uppercase tracking-widest text-right">DIV</th>
+                                    <th className="px-4 py-4 text-[10px] font-black text-slate-500 uppercase tracking-widest text-right">CONF</th>
+                                    <th className="px-4 py-4 text-[10px] font-black text-slate-500 uppercase tracking-widest text-right">SB</th>
+                                    <th className="px-6 py-4 text-[10px] font-black text-[#22c55e] uppercase tracking-widest text-right">Total</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-800/50">
+                                {!isUserInTop && currentUserData && (
+                                    <>
+                                        <tr className="bg-blue-900/20">
+                                            <td className="px-6 py-4 text-sm font-black text-blue-400 tabular-nums">#{currentUserData.rank}</td>
+                                            <td className="px-4 py-4 font-bold text-white flex items-center gap-2">
+                                                {getUserDisplayName(currentUserData)} 
+                                                <span className="text-[9px] bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded uppercase tracking-wider">You</span>
+                                            </td>
+                                            <td className="px-4 py-4 text-sm font-bold text-slate-400 text-right tabular-nums">{currentUserData.scores?.WildCard?.toFixed(1) || '0.0'}</td>
+                                            <td className="px-4 py-4 text-sm font-bold text-slate-400 text-right tabular-nums">{currentUserData.scores?.Divisional?.toFixed(1) || '0.0'}</td>
+                                            <td className="px-4 py-4 text-sm font-bold text-slate-400 text-right tabular-nums">{currentUserData.scores?.Conference?.toFixed(1) || '0.0'}</td>
+                                            <td className="px-4 py-4 text-sm font-bold text-slate-400 text-right tabular-nums">{currentUserData.scores?.Superbowl?.toFixed(1) || '0.0'}</td>
+                                            <td className="px-6 py-4 text-lg font-black text-white text-right tabular-nums">{currentUserData.scores?.Total?.toFixed(1) || '0.0'}</td>
+                                        </tr>
+                                        <tr className="border-b-4 border-slate-800/50"><td colSpan={7} className="px-6 py-2 text-[9px] font-black text-slate-600 uppercase tracking-widest text-center">Top 20 Leaderboard</td></tr>
+                                    </>
+                                )}
+                                {topUsers.map((user) => (
+                                    <tr key={user.id} className={`hover:bg-slate-800/30 transition-colors ${user.id === userId ? 'bg-blue-900/10' : ''}`}>
+                                        <td className={`px-6 py-4 text-sm font-black tabular-nums ${user.rank === 1 ? 'text-yellow-400' : 'text-slate-400'}`}>{user.rank}</td>
+                                        <td className="px-4 py-4 font-bold text-white">
+                                            {getUserDisplayName(user)} 
+                                            {user.id === userId && <span className="text-[9px] bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded uppercase tracking-wider ml-2">You</span>}
+                                        </td>
+                                        <td className="px-4 py-4 text-sm font-bold text-slate-500 text-right tabular-nums">{user.scores?.WildCard?.toFixed(1) || '0.0'}</td>
+                                        <td className="px-4 py-4 text-sm font-bold text-slate-500 text-right tabular-nums">{user.scores?.Divisional?.toFixed(1) || '0.0'}</td>
+                                        <td className="px-4 py-4 text-sm font-bold text-slate-500 text-right tabular-nums">{user.scores?.Conference?.toFixed(1) || '0.0'}</td>
+                                        <td className="px-4 py-4 text-sm font-bold text-slate-500 text-right tabular-nums">{user.scores?.Superbowl?.toFixed(1) || '0.0'}</td>
+                                        <td className="px-6 py-4 text-lg font-black text-[#22c55e] text-right tabular-nums">{user.scores?.Total?.toFixed(1) || '0.0'}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
                     </div>
-                  </div>
-                  <div className="text-right border-l border-gray-800 pl-6">
-                    <div className="text-xl font-black text-green-500 tracking-tighter leading-none tabular-nums">
-                      {getPlayerProjPPR(p).toFixed(1)}
-                    </div>
-                    <div className="text-[8px] text-gray-600 uppercase font-black tracking-widest mt-1">Proj PPR</div>
-                  </div>
-                </button>
-              ))}
+                </div>
+            </div>
+          )}
+
+        </main>
+      </div>
+
+      {isModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#020617]/95 p-4 backdrop-blur-sm">
+          <div className="bg-slate-900 w-full max-w-xl rounded-[2rem] flex flex-col max-h-[85vh] border border-slate-700 shadow-2xl overflow-hidden animate-in zoom-in duration-200">
+            <div className="px-8 py-6 border-b border-slate-800 bg-slate-900/50">
+              <div className="flex justify-between items-center mb-4"><h3 className="font-black text-white uppercase tracking-widest text-[10px] text-[#22c55e]">Selection: {selectedSlot}</h3><button onClick={() => setIsModalOpen(false)} className="text-slate-500 hover:text-white transition-colors">✕</button></div>
+              <div className="relative"><Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" size={14} /><input autoFocus placeholder="SEARCH PLAYERS..." className="w-full bg-slate-950 border border-slate-800 rounded-xl py-4 pl-12 pr-4 text-xs font-bold text-white uppercase tracking-widest focus:border-[#22c55e] outline-none transition-all" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} /></div>
+            </div>
+            <div className="overflow-y-auto p-4 space-y-2 custom-scrollbar border-t border-slate-800/50">
+              {filteredPlayersList.length === 0 && modalPlayers.length === 0 ? (<div className="p-10 text-center text-slate-500 text-xs font-bold uppercase tracking-widest">Loading available players...</div>) : (
+                filteredPlayersList.map(p => {
+                    const isPrevUsed = previouslySelectedIds.has(p.id);
+                    const isCurrUsed = currentRoundIds.has(p.id) && lineup[selectedSlot!]?.id !== p.id;
+                    const isDisabled = isPrevUsed || isCurrUsed;
+                    return (
+                        <button key={p.id} onClick={() => !isDisabled && handleSelectPlayer(p)} disabled={isDisabled} className={`w-full text-left p-5 rounded-2xl flex justify-between items-center group transition-all border ${isDisabled ? 'bg-slate-900/50 border-transparent opacity-50 cursor-not-allowed' : 'hover:bg-white/5 border-transparent hover:border-[#22c55e]/30'}`}>
+                        <div className="flex items-center space-x-5">
+                            <div className={`text-[10px] font-black w-10 h-10 flex items-center justify-center rounded-lg border transition-all ${isDisabled ? 'bg-slate-800 border-slate-700 text-slate-600' : 'bg-slate-950 border-slate-800 text-slate-500 group-hover:border-[#22c55e]'}`}>{p.position}</div>
+                            <div>
+                                <div className="flex items-center gap-2"><div className={`text-base font-bold tracking-tight leading-none transition-colors ${isDisabled ? 'text-slate-500' : 'text-white group-hover:text-[#22c55e]'}`}>{p.name || p.longName}</div>
+                                    {isPrevUsed && (<span className="text-[9px] font-black uppercase tracking-widest bg-red-500/10 text-red-500 px-2 py-0.5 rounded border border-red-500/20">Previously Selected</span>)}
+                                    {isCurrUsed && (<span className="text-[9px] font-black uppercase tracking-widest bg-yellow-500/10 text-yellow-500 px-2 py-0.5 rounded border border-yellow-500/20 flex items-center gap-1"><AlertCircle size={10} /> Active in Lineup</span>)}
+                                </div>
+                                <div className="text-[10px] text-gray-500 uppercase font-black tracking-widest mt-2 flex items-center gap-2"><span className={isDisabled ? 'text-slate-600' : 'text-white font-black'}>{p.team}</span><span className="text-slate-800">•</span><span>{getMatchupInfo(p.team).opponent}</span></div>
+                            </div>
+                        </div>
+                        <div className="text-right border-l border-slate-800 pl-6"><div className={`text-xl font-black tracking-tighter tabular-nums ${isDisabled ? 'text-slate-600' : 'text-[#22c55e]'}`}>{getPlayerProj(p).toFixed(1)}</div><div className="text-[8px] text-gray-600 uppercase font-black tracking-widest">Proj {scoringLabel}</div></div>
+                        </button>
+                    );
+                })
+              )}
             </div>
           </div>
         </div>

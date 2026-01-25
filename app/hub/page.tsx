@@ -17,20 +17,20 @@ import {
   serverTimestamp 
 } from 'firebase/firestore'; 
 import { auth, db } from '@/lib/firebase'; 
+import { Check } from 'lucide-react'; 
 
 // --- INTERFACES ---
 interface League {
   id: string;
   name: string;
-  type: 'standard' | 'custom';
+  // REMOVED: type field
   privacy: 'public' | 'private';
   members: string[]; 
   ownerId: string;
   password?: string;
   ownerName?: string;
   settings?: {
-    ppr?: boolean;
-    scoringType?: 'PPR' | 'Half-PPR' | 'Standard Scoring';
+    scoringType?: 'PPR' | 'Half-PPR' | 'Standard';
   };
 }
 
@@ -48,10 +48,13 @@ interface LeagueJoinModalProps {
 // --- 1. CREATE LEAGUE MODAL ---
 const CreateLeagueModal = ({ onClose, user }: CreateLeagueModalProps) => {
   const router = useRouter();
-  const [leagueType, setLeagueType] = useState<'standard' | 'custom'>('standard'); 
   const [leagueName, setLeagueName] = useState('');
   const [isPrivate, setIsPrivate] = useState(false);
   const [password, setPassword] = useState('');
+  
+  // Scoring Type State
+  const [scoringType, setScoringType] = useState<'PPR' | 'Half-PPR' | 'Standard'>('PPR');
+  
   const [isCreating, setIsCreating] = useState(false);
 
   const handleContinue = async () => {
@@ -64,15 +67,18 @@ const CreateLeagueModal = ({ onClose, user }: CreateLeagueModalProps) => {
       const ownerDisplayName = user.displayName || user.email?.split('@')[0] || 'Commissioner';
 
       const leagueRef = await addDoc(collection(db, "leagues"), {
-        name: leagueName,
-        type: leagueType,
+        name: leagueName.trim(),
+        // REMOVED: type: 'standard'
         ownerId: user.uid,
         ownerName: ownerDisplayName, 
         privacy: isPrivate ? 'private' : 'public',
         password: isPrivate ? password : null, 
         createdAt: serverTimestamp(),
         members: [user.uid], 
-        settings: { ppr: true, scoringType: 'PPR' },
+        
+        // Settings
+        scoringType: scoringType, 
+        settings: { scoringType: scoringType }
       });
 
       const memberRef = doc(db, "leagues", leagueRef.id, "Members", user.uid);
@@ -83,7 +89,8 @@ const CreateLeagueModal = ({ onClose, user }: CreateLeagueModalProps) => {
         "Wild Card Lineup": {},
         "Divisional Lineup": {},
         "Conference Lineup": {},
-        "Super Bowl Lineup": {}
+        "Super Bowl Lineup": {},
+        scores: { Total: 0 }
       });
 
       router.push(`/league/${leagueRef.id}`);
@@ -94,6 +101,12 @@ const CreateLeagueModal = ({ onClose, user }: CreateLeagueModalProps) => {
     }
   };
 
+  const scoringOptions = [
+    { id: 'PPR', label: 'PPR', desc: '1 pt per reception' },
+    { id: 'Half-PPR', label: 'Half PPR', desc: '0.5 pt per reception' },
+    { id: 'Standard', label: 'Standard', desc: '0 pt per reception' }
+  ];
+
   return (
     <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
       <div className="bg-gray-800 rounded-xl shadow-2xl max-w-2xl w-full overflow-hidden border border-gray-700">
@@ -103,6 +116,8 @@ const CreateLeagueModal = ({ onClose, user }: CreateLeagueModalProps) => {
         </div>
 
         <div className="p-8 space-y-6">
+          
+          {/* League Name */}
           <div>
             <label className="block text-xs font-black text-gray-500 uppercase tracking-widest mb-2">League Name</label>
             <input 
@@ -110,10 +125,11 @@ const CreateLeagueModal = ({ onClose, user }: CreateLeagueModalProps) => {
               placeholder="e.g. The Sunday Showdown"
               value={leagueName}
               onChange={(e) => setLeagueName(e.target.value)}
-              className="w-full p-3 bg-gray-900 border border-gray-700 rounded-lg focus:ring-2 focus:ring-green-500 outline-none text-white placeholder-gray-600 font-bold"
+              className="w-full p-3 bg-gray-900 border border-gray-700 rounded-lg focus:ring-2 focus:ring-green-500 outline-none text-white placeholder-gray-600 font-bold uppercase"
             />
           </div>
           
+          {/* Privacy Toggle */}
           <div className="p-4 bg-gray-900/50 rounded-lg border border-gray-700">
             <label className="flex items-center space-x-3 cursor-pointer mb-2">
               <input 
@@ -137,38 +153,40 @@ const CreateLeagueModal = ({ onClose, user }: CreateLeagueModalProps) => {
             )}
           </div>
 
+          {/* Scoring Selector */}
           <div>
-            <h4 className="text-xs font-black uppercase tracking-widest text-gray-500 mb-4">Select Format:</h4>
-            <div className="grid grid-cols-2 gap-6">
-              <div 
-                onClick={() => setLeagueType('standard')}
-                className={`cursor-pointer border-2 rounded-xl p-6 transition-all ${
-                  leagueType === 'standard' 
-                    ? 'border-green-500 bg-green-500/10 shadow-[0_0_15px_rgba(34,197,94,0.1)]' 
-                    : 'border-gray-700 bg-gray-800 hover:border-gray-600'
-                }`}
-              >
-                <h5 className="font-black text-white uppercase tracking-tight">Standard</h5>
-                <p className="text-[10px] font-bold text-gray-500 mt-1 uppercase">Default scoring & rosters</p>
-              </div>
-              <div 
-                className="cursor-not-allowed border-2 border-gray-700 bg-gray-800/50 rounded-xl p-6 opacity-60"
-              >
-                <div className="flex justify-between items-start">
-                  <h5 className="font-black text-gray-400 uppercase tracking-tight">Custom</h5>
-                  <span className="text-[8px] font-black bg-gray-700 text-gray-300 px-1.5 py-0.5 rounded uppercase">Soon</span>
-                </div>
-                 <p className="text-[10px] font-bold text-gray-500 mt-1 uppercase tracking-tighter">Full control</p>
-              </div>
+            <h4 className="text-xs font-black uppercase tracking-widest text-gray-500 mb-4">Scoring Format:</h4>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {scoringOptions.map((opt) => (
+                <button
+                  key={opt.id}
+                  onClick={() => setScoringType(opt.id as any)}
+                  className={`p-4 rounded-xl border text-left transition-all relative overflow-hidden group
+                    ${scoringType === opt.id 
+                      ? 'bg-green-500/10 border-green-500 text-white shadow-[0_0_15px_rgba(34,197,94,0.1)]' 
+                      : 'bg-gray-800 border-gray-700 text-gray-500 hover:border-gray-600'}`}
+                >
+                  <div className="flex justify-between items-center mb-1">
+                      <span className={`text-sm font-black uppercase tracking-tight ${scoringType === opt.id ? 'text-green-400' : 'text-gray-400'}`}>
+                          {opt.label}
+                      </span>
+                      {scoringType === opt.id && <Check size={14} className="text-green-400" />}
+                  </div>
+                  <span className="text-[9px] font-bold uppercase tracking-wider opacity-60">{opt.desc}</span>
+                </button>
+              ))}
             </div>
           </div>
+
         </div>
 
         <div className="px-6 py-4 bg-gray-900/50 border-t border-gray-700 flex justify-end space-x-3">
           <button onClick={onClose} className="px-5 py-2 text-xs font-black uppercase tracking-widest text-gray-500 hover:text-white transition-colors">Cancel</button>
           <button 
             onClick={handleContinue}
-            className="px-6 py-2 bg-green-500 text-black rounded-lg font-black uppercase tracking-widest hover:bg-green-400 transition-colors shadow-lg shadow-green-500/20"
+            disabled={!leagueName.trim() || (isPrivate && !password.trim()) || isCreating}
+            className={`px-6 py-2 bg-green-500 text-black rounded-lg font-black uppercase tracking-widest hover:bg-green-400 transition-colors shadow-lg shadow-green-500/20 
+                ${(!leagueName.trim() || (isPrivate && !password.trim()) || isCreating) ? 'opacity-50 cursor-not-allowed' : ''}`}
           >
             {isCreating ? 'Creating...' : 'Create League'}
           </button>
@@ -214,7 +232,8 @@ const LeagueJoinModal = ({ league, user, onClose }: LeagueJoinModalProps) => {
         "Wild Card Lineup": {},
         "Divisional Lineup": {},
         "Conference Lineup": {},
-        "Super Bowl Lineup": {}
+        "Super Bowl Lineup": {},
+        scores: { Total: 0 }
       }, { merge: true });
 
       router.push(`/league/${league.id}`);
@@ -325,7 +344,7 @@ export default function HubPage() {
 
   return (
     <div className="min-h-screen bg-gray-950 text-white">
-      {/* HEADER REMOVED: Navigation handled by Global Navbar in layout.tsx */}
+      {/* GLOBAL HEADER IS HANDLED IN LAYOUT.TSX */}
       
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-10 gap-6">
@@ -374,7 +393,8 @@ export default function HubPage() {
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
                 {myLeagues.map(league => {
-                  const scoringFormat = league.settings?.scoringType || (league.settings?.ppr ? 'PPR' : 'Standard Scoring');
+                  // Fallback if older leagues don't have scoringType set yet
+                  const scoringFormat = league.settings?.scoringType || 'Standard';
 
                   return (
                     <Link href={`/league/${league.id}`} key={league.id} className="group">
@@ -406,7 +426,7 @@ export default function HubPage() {
              ) : (
                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
                  {publicLeagues.map(league => {
-                   const scoringFormat = league.settings?.scoringType || (league.settings?.ppr ? 'PPR' : 'Standard Scoring');
+                   const scoringFormat = league.settings?.scoringType || 'Standard';
 
                    return (
                     <div key={league.id} className="bg-gray-900 rounded-2xl p-8 border border-gray-800 flex flex-col shadow-lg">

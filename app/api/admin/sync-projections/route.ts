@@ -1,111 +1,177 @@
 ﻿import { NextResponse } from 'next/server';
-import { doc, writeBatch } from 'firebase/firestore'; 
+import { doc, writeBatch } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 
 export const dynamic = 'force-dynamic';
+
+const API_KEY = '85657f0983msh1fda8640dd67e05p1bb7bejsn3e59722b8c1e';
+const API_HOST = 'tank01-nfl-live-in-game-real-time-statistics-nfl.p.rapidapi.com';
+
+const DST_ID_MAP: Record<string, string> = {
+    "ARI": "ARI", "ATL": "ATL", "BAL": "BAL", "BUF": "BUF", "CAR": "CAR",
+    "CHI": "CHI", "CIN": "CIN", "CLE": "CLE", "DAL": "DAL", "DEN": "DEN",
+    "DET": "DET", "GB": "GB",   "HOU": "HOU", "IND": "IND", "JAX": "JAX",
+    "KC": "KC",   "LV": "LV",   "LAC": "LAC", "LAR": "LAR", "MIA": "MIA",
+    "MIN": "MIN", "NE": "NE",   "NO": "NO",   "NYG": "NYG", "NYJ": "NYJ",
+    "PHI": "PHI", "PIT": "PIT", "SEA": "SEA", "SF": "SF",   "TB": "TB",
+    "TEN": "TEN", "WAS": "WAS", "WSH": "WAS" 
+};
+
+const parseScore = (val: any) => {
+    if (val === undefined || val === null || val === "") return 0;
+    if (typeof val === 'number') return val;
+    const num = parseFloat(String(val).replace(/,/g, ''));
+    return isNaN(num) ? 0 : num;
+};
+
+// Flatten API structure
+const normalizeProjections = (data: any) => {
+    let allItems: any[] = [];
+    const root = data.body || data;
+
+    if (Array.isArray(root)) return root;
+
+    if (typeof root === 'object' && root !== null) {
+        if (root.playerProjections) {
+            allItems = allItems.concat(Object.values(root.playerProjections));
+        }
+        if (root.teamDefenseProjections) {
+            const defs = Object.values(root.teamDefenseProjections);
+            defs.forEach((d: any) => {
+                d.pos = 'DEF'; 
+                const t = d.teamAbv || d.team;
+                d.playerID = DST_ID_MAP[t] || t; 
+            });
+            allItems = allItems.concat(defs);
+        }
+    }
+    return allItems;
+};
 
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
     const secret = searchParams.get('secret');
-    const targetWeek = searchParams.get('week') || '19';
     
-    if (secret !== 'Touchdown2026') {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    // DEFAULT TO 19 IF MISSING, BUT LOG IT
+    const internalWeek = searchParams.get('week') || '19'; 
+
+    if (secret !== 'Touchdown2026') return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+    const weekMapping: Record<string, { apiWeek: string; roundName: string }> = {
+      '19': { apiWeek: '19', roundName: 'WildCard' },
+      '20': { apiWeek: '20', roundName: 'Divisional' },
+      '21': { apiWeek: '21', roundName: 'Conference' },
+      '22': { apiWeek: '22', roundName: 'Superbowl' }
+    };
+
+    const target = weekMapping[internalWeek];
+    if (!target) return NextResponse.json({ error: `Invalid week: ${internalWeek}` }, { status: 400 });
+
+    console.log(`[Sync-Projections] ------------------------------------------------`);
+    console.log(`[Sync-Projections] STARTING SYNC: ${target.roundName} (Week ${target.apiWeek})`);
+    
+    let url = `https://${API_HOST}/getNFLProjections?week=${target.apiWeek}&season=2025&seasonType=post&archive=false`;
+    let res = await fetch(url, { headers: { 'x-rapidapi-key': API_KEY, 'x-rapidapi-host': API_HOST } });
+    let data = await res.json();
+    let projections = normalizeProjections(data);
+
+    // DEBUG: Check if we got nothing
+    if (projections.length === 0) {
+        console.warn(`[Sync-Projections] WARNING: API returned 0 players for Week ${target.apiWeek}.`);
+        console.warn(`[Sync-Projections] This usually means the matchups are not set yet.`);
+        return NextResponse.json({ message: `No projections found for ${target.roundName}. Matchups might not be set.` });
     }
 
-    const roundMap: Record<string, string> = {
-      '19': 'WildCard',
-      '20': 'Divisional',
-      '21': 'Conference',
-      '22': 'Superbowl'
-    };
-    const roundName = roundMap[targetWeek.toString()] || `week_${targetWeek}`;
+    // DEBUG: Look for Bo Nix specifically
+    const boNixFound = projections.find((p: any) => p.longName === "Bo Nix" || p.name === "Bo Nix");
+    if (boNixFound) {
+        console.log(`[Sync-Projections] ✅ FOUND BO NIX in API data! Proceeding to update...`);
+    } else {
+        console.warn(`[Sync-Projections] ❌ BO NIX NOT FOUND in API data for Week ${target.apiWeek}.`);
+    }
 
-    const apiKey = '85657f0983msh1fda8640dd67e05p1bb7bejsn3e59722b8c1e';
-    const url = `https://tank01-nfl-live-in-game-real-time-statistics-nfl.p.rapidapi.com/getNFLProjections?week=${targetWeek}&season=2025&seasonType=post&itemFormat=map&twoPointConversions=2&passYards=.04&passTD=4&pointsPerReception=1&rushYards=.1&rushTD=6&receivingYards=.1&receivingTD=6`;
-    
-    const response = await fetch(url, {
-      headers: {
-        'x-rapidapi-key': apiKey,
-        'x-rapidapi-host': 'tank01-nfl-live-in-game-real-time-statistics-nfl.p.rapidapi.com'
-      }
-    });
-
-    const data = await response.json();
-    
-    // --- 1. TARGET THE CORRECT DATA MAPS ---
-    // Skill players are in playerProjections
-    const projectionsMap = data.body?.playerProjections || {}; 
-    // Defenses are specifically in teamDefenseProjections
-    const dstMap = data.body?.teamDefenseProjections || {}; 
-    
-    const batch = writeBatch(db);
+    let batch = writeBatch(db);
     let count = 0;
-    let dstCount = 0;
+    const BATCH_LIMIT = 400; 
 
-    // --- 2. REUSABLE PROCESSING FUNCTION ---
-    const processEntry = (id: string, stats: any, isDST: boolean) => {
-      if (!id || typeof stats !== 'object') return;
+    for (const p of projections) {
+        
+        // 1. Position Normalization
+        let pos = (p.pos || p.position || '').trim();
+        if (pos === 'PK') pos = 'K'; 
 
-      // Extract scores correctly based on the entry type
-      let pprVal = 0, halfVal = 0, stdVal = 0;
+        // Filter out junk, but keep the core positions
+        if (!['QB', 'RB', 'WR', 'TE', 'K', 'DST', 'DEF'].includes(pos)) continue;
 
-      if (isDST) {
-        // DST uses a direct string for fantasyPointsDefault at the root level
-        pprVal = Number(stats.fantasyPointsDefault || 0);
-        halfVal = pprVal; 
-        stdVal = pprVal;
-      } else {
-        // Skill players use a nested fantasyPointsDefault object
-        const pts = stats.fantasyPointsDefault || {};
-        pprVal = Number(pts.PPR || 0);
-        halfVal = Number(pts.halfPPR || 0);
-        stdVal = Number(pts.standard || 0);
-      }
+        let docId = p.playerID;
+        let name = p.longName || `${p.firstName} ${p.lastName}`;
+        const team = p.team || p.teamAbv;
 
-      const playerRef = doc(db, 'players', id);
-      const team = stats.teamAbv || stats.team || "N/A";
-
-      batch.set(playerRef, {
-        name: isDST ? `${team} Defense` : (stats.longName || stats.name || "Unknown Player"),
-        team: team,
-        // Force "DEF" so the selection modal filter requiredPos === 'DEF' works
-        position: isDST ? "DEF" : (stats.pos || stats.position || "N/A"),
-        playerID: id,
-        [roundName]: {
-          Active: true,
-          "Projected PPR": Number(pprVal.toFixed(2)),
-          "Projected Half PPR": Number(halfVal.toFixed(2)),
-          "Projected Standard": Number(stdVal.toFixed(2)),
-          PPR: 0,
-          Half: 0,
-          Standard: 0,
-          opponent: stats.opponent || "BYE"
+        if (pos === 'DST' || pos === 'DEF') {
+            docId = DST_ID_MAP[team] || team;
+            pos = 'DEF';
+            name = `${team} Defense`;
         }
-      }, { merge: true }); 
-      
-      count++;
-    };
 
-    // --- 3. RUN FOR BOTH MAPS ---
-    Object.entries(projectionsMap).forEach(([pid, stats]) => processEntry(pid, stats, false));
+        if (!docId) continue;
+
+        // 2. Parse Scores
+        let ppr = 0, half = 0, std = 0;
+
+        if (p.fantasyPointsDefault) {
+             if (typeof p.fantasyPointsDefault === 'object') {
+                 ppr = parseScore(p.fantasyPointsDefault.PPR || p.fantasyPoints);
+                 half = parseScore(p.fantasyPointsDefault.halfPPR || p.fantasyPointsDefault.HalfPPR);
+                 std = parseScore(p.fantasyPointsDefault.standard || p.fantasyPointsDefault.Standard);
+             } else {
+                 const val = parseScore(p.fantasyPointsDefault);
+                 ppr = val; half = val; std = val;
+             }
+        } else {
+             const val = parseScore(p.fantasyPoints || p.projectedPoints);
+             ppr = val; half = val; std = val;
+        }
+
+        // Fill gaps
+        if (ppr > 0 && half === 0) half = ppr * 0.85; 
+        if (ppr > 0 && std === 0) std = ppr * 0.7;
+
+        const playerRef = doc(db, 'players', docId);
+
+        // 3. CONSTRUCT UPDATE
+        // This explicitly sets 'position' at the root, AND nests the round data.
+        const updateData = {
+            name: name,
+            team: team,
+            position: pos,  // <--- THIS FORCES THE POSITION UPDATE AT ROOT
+            [target.roundName]: {
+                "Projected PPR": Number(ppr.toFixed(2)),
+                "Projected Half PPR": Number(half.toFixed(2)),
+                "Projected Standard": Number(std.toFixed(2)),
+                Active: true,
+                opponent: p.opponent || "BYE"
+            }
+        };
+
+        batch.set(playerRef, updateData, { merge: true });
+
+        count++;
+        if (count % BATCH_LIMIT === 0) {
+            await batch.commit();
+            batch = writeBatch(db); 
+        }
+    }
+
+    if (count % BATCH_LIMIT !== 0) {
+        await batch.commit();
+    }
     
-    Object.entries(dstMap).forEach(([did, stats]: [string, any]) => {
-      // Use teamAbv as the ID for defenses
-      const id = stats.teamAbv || did; 
-      processEntry(id, stats, true);
-      dstCount++;
-    });
+    console.log(`[Sync-Projections] SUCCESS: Updated ${count} records for ${target.roundName}.`);
+    return NextResponse.json({ success: true, updated: count, round: target.roundName });
 
-    console.log(`[Sync] ⏳ Committing ${count} total entries (including ${dstCount} defenses) to ${roundName}...`);
-    await batch.commit(); 
-    console.log(`[Sync] ✅ Batch successfully committed.`);
-
-    return NextResponse.json({ success: true, count, dstCount, round: roundName });
-
-  } catch (err: any) {
-    console.error("[Sync] 🔥 ERROR:", err.message);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+  } catch (error: any) {
+    console.error(`[Sync-Projections] ERROR: ${error.message}`);
+    return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
