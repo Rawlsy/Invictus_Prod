@@ -2,11 +2,11 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { collection, query, where, getDocs } from 'firebase/firestore';
+import { collection, query, getDocs, getCountFromServer } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
 import { db, auth } from '@/lib/firebase';
 import Link from 'next/link';
-import { Plus, Trophy, ChevronRight, LogOut } from 'lucide-react';
+import { Plus, Trophy, ChevronRight } from 'lucide-react';
 
 export default function Hub() {
   const router = useRouter();
@@ -19,17 +19,32 @@ export default function Hub() {
       if (!u) { router.push('/login'); return; }
       setUser(u);
       
-      // Fetch leagues where user is a member
-      // Note: This requires a complex query or storing league IDs on the user profile.
-      // For simplicity in this demo, fetching ALL leagues and filtering client side 
-      // (Optimized app would use 'array-contains' query on leagues)
-      const q = query(collection(db, 'leagues')); 
-      const snap = await getDocs(q);
-      const userLeagues = snap.docs.map(d => ({ id: d.id, ...d.data() })); 
-      // In a real app, filter here: .filter(l => l.members.includes(u.uid))
-      
-      setLeagues(userLeagues);
-      setLoading(false);
+      try {
+        // 1. Fetch all leagues
+        const q = query(collection(db, 'leagues')); 
+        const snap = await getDocs(q);
+        
+        // 2. Map over leagues and fetch the member count for each
+        const leaguePromises = snap.docs.map(async (d) => {
+            const leagueData = { id: d.id, ...d.data() };
+            
+            // Get count of documents in the 'Members' subcollection
+            const membersColl = collection(db, 'leagues', d.id, 'Members');
+            const snapshot = await getCountFromServer(membersColl);
+            
+            return {
+                ...leagueData,
+                realMemberCount: snapshot.data().count
+            };
+        });
+
+        const fullLeagues = await Promise.all(leaguePromises);
+        setLeagues(fullLeagues);
+      } catch (error) {
+        console.error("Error fetching leagues:", error);
+      } finally {
+        setLoading(false);
+      }
     });
     return () => unsubscribe();
   }, [router]);
@@ -41,7 +56,7 @@ export default function Hub() {
       
       {/* Top Bar */}
       <header className="px-6 py-6 flex justify-between items-center max-w-5xl mx-auto">
-        <h1 className="text-xl font-black italic tracking-tighter uppercase">INVICTUS<span className="text-[#22c55e]">HUB</span></h1>
+        <h1 className="text-xl font-black italic tracking-tighter uppercase"><span className="text-[#22c55e]">HUB</span></h1>
       </header>
 
       <main className="max-w-5xl mx-auto px-4 md:px-6">
@@ -76,7 +91,8 @@ export default function Hub() {
                 <div className="flex gap-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider">
                   <span>{league.scoringType || 'PPR'}</span>
                   <span>•</span>
-                  <span>{league.members?.length || 0} Members</span>
+                  {/* DISPLAY REAL COUNT HERE */}
+                  <span>{league.realMemberCount} Members</span>
                 </div>
               </Link>
             ))}

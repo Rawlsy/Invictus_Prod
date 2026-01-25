@@ -483,7 +483,7 @@ export default function LeaguePage() {
                 <ChevronLeft size={24} />
              </button>
              <h1 className="text-xl md:text-2xl font-black italic tracking-tighter text-white uppercase">
-                INVICTUS<span className="text-[#22c55e]">SPORTS</span>
+                League<span className="text-[#22c55e]">Page</span>
              </h1>
           </div>
         </header>
