@@ -8,7 +8,30 @@ const inter = Inter({ subsets: ['latin'] });
 
 export const metadata: Metadata = {
   title: 'Invictus Sports',
-  description: 'Fantasy Sports League Manager',
+  description: 'The premier platform for Playoff Fantasy Football. Build your dynasty, track live scores, and dominate the post-season.',
+  metadataBase: new URL('https://invictussports.app'), // Your custom domain
+  openGraph: {
+    title: 'Invictus Sports',
+    description: 'The premier platform for Playoff Fantasy Football.',
+    url: 'https://invictussports.app',
+    siteName: 'Invictus Sports',
+    images: [
+      {
+        url: '/og-image.png', // This file must exist in your public/ folder
+        width: 1200,
+        height: 630,
+        alt: 'Invictus Sports Preview',
+      },
+    ],
+    locale: 'en_US',
+    type: 'website',
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'Invictus Sports',
+    description: 'The premier platform for Playoff Fantasy Football.',
+    images: ['/og-image.png'],
+  },
 };
 
 export default function RootLayout({
