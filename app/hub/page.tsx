@@ -2,11 +2,23 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { collection, query, where, getDocs, addDoc, doc, setDoc, serverTimestamp } from 'firebase/firestore'; 
+// 1. ADD onSnapshot to imports
+import { collection, query, where, onSnapshot, addDoc, doc, setDoc, serverTimestamp } from 'firebase/firestore'; 
 import { onAuthStateChanged } from 'firebase/auth';
 import { db, auth } from '@/lib/firebase';
 import Link from 'next/link';
-import { Plus, Trophy, ChevronRight, X, Loader2, Lock } from 'lucide-react'; // Added Lock icon
+import { Plus, Trophy, ChevronRight, X, Loader2, Lock } from 'lucide-react';
+import JoinLeague from '../components/JoinLeague'; 
+
+// Helper to generate a random 5-char code
+const generateJoinCode = () => {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  let result = '';
+  for (let i = 0; i < 5; i++) {
+    result += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return result;
+};
 
 export default function Hub() {
   const router = useRouter();
@@ -19,12 +31,18 @@ export default function Hub() {
   const [newLeagueName, setNewLeagueName] = useState('');
   const [scoringType, setScoringType] = useState('PPR');
   const [privacy, setPrivacy] = useState('Private');
-  const [password, setPassword] = useState(''); // NEW: Password State
+  const [password, setPassword] = useState('');
   const [creating, setCreating] = useState(false);
 
+  // --- REAL-TIME DATA FETCHING ---
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (u) => {
-      if (!u) { router.push('/login'); return; }
+    let unsubscribeLeagues: () => void = () => {};
+
+    const unsubscribeAuth = onAuthStateChanged(auth, (u) => {
+      if (!u) { 
+        router.push('/login'); 
+        return; 
+      }
       setUser(u);
       
       try {
@@ -33,33 +51,46 @@ export default function Hub() {
           where('memberIDs', 'array-contains', u.uid)
         ); 
         
-        const snap = await getDocs(q);
-        const userLeagues = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-        setLeagues(userLeagues);
+        // 2. CHANGED to onSnapshot (Real-time listener)
+        // This will automatically fire whenever you join or create a league
+        unsubscribeLeagues = onSnapshot(q, (snapshot) => {
+            const userLeagues = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+            setLeagues(userLeagues);
+            setLoading(false);
+        }, (error) => {
+            console.error("Error listening to leagues:", error);
+            setLoading(false);
+        });
 
       } catch (error) {
-        console.error("Error fetching leagues:", error);
-      } finally {
+        console.error("Error setting up listener:", error);
         setLoading(false);
       }
     });
-    return () => unsubscribe();
+
+    // Cleanup listeners on unmount
+    return () => {
+        unsubscribeAuth();
+        unsubscribeLeagues();
+    };
   }, [router]);
 
   const handleCreateLeague = async (e: React.FormEvent) => {
     e.preventDefault();
-    // NEW: Validation checks for name and password if private
     if (!newLeagueName.trim() || !user) return;
     if (privacy === 'Private' && !password.trim()) return;
 
     setCreating(true);
     try {
+        const joinCode = generateJoinCode();
+
         // 1. Create the League Document
         const leagueRef = await addDoc(collection(db, 'leagues'), {
             name: newLeagueName,
             scoringType: scoringType,
             privacy: privacy,
-            password: privacy === 'Private' ? password : null, // NEW: Save Password
+            password: privacy === 'Private' ? password : null,
+            joinCode: joinCode,
             ownerId: user.uid,
             createdAt: serverTimestamp(),
             memberIDs: [user.uid], 
@@ -73,19 +104,12 @@ export default function Hub() {
             scores: { "Total": 0.0 }
         });
 
-        // 3. Update UI locally
-        const newLeague = {
-            id: leagueRef.id,
-            name: newLeagueName,
-            scoringType,
-            memberCount: 1
-        };
-        setLeagues([...leagues, newLeague]);
+        // Note: We don't need to manually update state here because 
+        // onSnapshot above will see the new DB entry and auto-update the UI!
         
-        // 4. Close Modal & Reset
         setShowCreateModal(false);
         setNewLeagueName('');
-        setPassword(''); // Reset password
+        setPassword('');
         setCreating(false);
 
     } catch (error) {
@@ -94,7 +118,6 @@ export default function Hub() {
     }
   };
 
-  // Helper to check if form is valid
   const isFormValid = newLeagueName.trim().length > 0 && (privacy === 'Public' || password.trim().length > 0);
 
   return (
@@ -108,19 +131,19 @@ export default function Hub() {
       <main className="max-w-5xl mx-auto px-4 md:px-6">
         
         {/* Welcome Section */}
-        <div className="mb-8">
-          <h2 className="text-3xl md:text-4xl font-black tracking-tight mb-2">Welcome Back, <br /> <span className="text-slate-500">{user?.displayName || 'Coach'}</span></h2>
+        <div className="mb-8 flex flex-col md:flex-row md:items-end justify-between gap-6">
+          <div>
+            <h2 className="text-3xl md:text-4xl font-black tracking-tight mb-2">Welcome Back, <br /> <span className="text-slate-500">{user?.displayName || 'Coach'}</span></h2>
+          </div>
+          
+          <div className="w-full md:w-auto">
+             <JoinLeague />
+          </div>
         </div>
 
         {/* Action Bar */}
-        <div className="flex justify-between items-center mb-6">
+        <div className="mb-6">
           <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">Your Leagues</span>
-          <button 
-            onClick={() => setShowCreateModal(true)}
-            className="flex items-center gap-2 bg-[#22c55e] text-[#020617] px-4 py-2 rounded-lg text-xs font-black uppercase tracking-widest hover:bg-[#16a34a] transition-all"
-          >
-            <Plus size={14} /> Create League
-          </button>
         </div>
 
         {/* League Grid */}
@@ -237,7 +260,7 @@ export default function Hub() {
                         </div>
                     </div>
 
-                    {/* NEW: Password Field (Only if Private) */}
+                    {/* Password Field */}
                     {privacy === 'Private' && (
                         <div className="animate-in slide-in-from-top-2 duration-200">
                             <label className="block text-[10px] font-bold uppercase tracking-widest text-[#22c55e] mb-2 flex items-center gap-1">

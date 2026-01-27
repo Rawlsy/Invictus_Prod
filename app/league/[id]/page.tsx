@@ -5,7 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { doc, setDoc, updateDoc, deleteField, onSnapshot, collection, getDocs, query, where, documentId, limit } from 'firebase/firestore'; 
 import { onAuthStateChanged, User } from 'firebase/auth'; 
 import { db, auth } from '@/lib/firebase'; 
-import { Lock, Search, ChevronLeft, Trash2, AlertCircle, Trophy, Share2, Copy, Check, Users, Shield, Crown, Key, Edit2, Save, X } from 'lucide-react'; 
+import { Lock, Search, ChevronLeft, Trash2, AlertCircle, Trophy, Share2, Copy, Check, Users, Shield, Crown, Key, Edit2, Save, X, Ticket } from 'lucide-react'; 
 
 const DB_LINEUP_KEYS = {
   wildcard: "Wild Card Lineup",
@@ -74,6 +74,7 @@ export default function LeaguePage() {
   const [ownerId, setOwnerId] = useState<string | null>(null);
   const [leaguePassword, setLeaguePassword] = useState<string>("Loading..."); 
   const [leaguePrivacy, setLeaguePrivacy] = useState<string>("Private");
+  const [joinCode, setJoinCode] = useState<string>("Loading..."); 
 
   const [isEditingPassword, setIsEditingPassword] = useState(false);
   const [newPassword, setNewPassword] = useState('');
@@ -130,6 +131,7 @@ export default function LeaguePage() {
         setLeagueName(data.name || "Untitled League");
         setOwnerId(data.ownerId || null);
         setLeaguePrivacy(data.privacy || "Private");
+        setJoinCode(data.joinCode || "N/A"); 
         
         if (data.password && data.password.length > 0) {
             setLeaguePassword(data.password);
@@ -266,20 +268,16 @@ export default function LeaguePage() {
     }
   }, [userId, leaderboard, params.id, authUser]);
 
-  // 4. FETCH MODAL PLAYERS (UPDATED: Fetch ALL by position, filter locally)
+  // 4. FETCH MODAL PLAYERS
   const fetchPlayersForSlot = useCallback(async (slot: string) => {
     setModalPlayers([]); 
     const requiredPos = slot.replace(/[0-9]/g, ''); 
     
     try {
         const playersRef = collection(db, 'players');
-        
-        // UPDATE: Removed strict limit(50). Using limit(1000) guarantees we get 
-        // ALL players for that position. Then 'filteredPlayersList' below
-        // handles hiding the players whose teams aren't playing this week.
         const q = requiredPos === 'FLEX' 
-            ? query(playersRef, where('position', 'in', ['RB', 'WR', 'TE']), limit(1500))
-            : query(playersRef, where('position', '==', requiredPos), limit(1000));
+            ? query(playersRef, where('position', 'in', ['RB', 'WR', 'TE']), limit(5000))
+            : query(playersRef, where('position', '==', requiredPos), limit(4000));
 
         const snapshot = await getDocs(q);
         const players = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
@@ -341,27 +339,27 @@ export default function LeaguePage() {
      return getRoundStatus(activeRound) !== 'active';
   };
 
-  // --- UPDATED: GAME LOCK LOGIC (Handles "6:30P" and "2024-01-25") ---
+  // --- GAME LOCK LOGIC ---
   const isGameLocked = (player: any) => {
     const pTeam = player.team || player.Team;
     const game = games.find(g => g['Home Team'] === pTeam || g['Away Team'] === pTeam);
     
     if (!game || !game.Date || !game.Time) return false;
 
-    // Parse Date: Handle "YYYYMMDD" (20260125) AND "YYYY-MM-DD" (2026-01-25)
+    // Parse Date
     let dateStr = String(game.Date);
     let year, month, day;
 
     if (dateStr.includes('-')) {
         [year, month, day] = dateStr.split('-').map(Number);
-        month = month - 1; // 0-index month for Date()
+        month = month - 1; 
     } else {
         year = parseInt(dateStr.substring(0, 4));
         month = parseInt(dateStr.substring(4, 6)) - 1;
         day = parseInt(dateStr.substring(6, 8));
     }
 
-    // Parse Time: Handle "3:00 P", "3:00P", "3:00 PM", "3:00PM"
+    // Parse Time
     const timeStr = game.Time; 
     const match = timeStr.match(/(\d+):(\d+)\s*([APap][Mm]?)/);
     
@@ -369,14 +367,13 @@ export default function LeaguePage() {
 
     let hours = parseInt(match[1], 10);
     const minutes = parseInt(match[2], 10);
-    const modifier = match[3].toUpperCase(); // P, PM, A, AM
+    const modifier = match[3].toUpperCase(); 
 
     if (modifier.startsWith('P') && hours < 12) hours += 12;
     if (modifier.startsWith('A') && hours === 12) hours = 0;
 
-    // Construct Date: Assume Eastern Time (UTC-5)
+    // Construct Date (Assume ET)
     const pad = (n: number) => n.toString().padStart(2, '0');
-    // Use ISO Format with Offset
     const gameIsoString = `${year}-${pad(month + 1)}-${pad(day)}T${pad(hours)}:${pad(minutes)}:00-05:00`;
     
     const gameDate = new Date(gameIsoString);
@@ -407,22 +404,33 @@ export default function LeaguePage() {
     };
   };
 
+  // --- DYNAMIC TEAM FILTERING ---
   const filteredPlayersList = useMemo(() => {
     const activeTeams = new Set<string>();
-    games.forEach(g => {
-      if (g['Home Team']) activeTeams.add(g['Home Team']);
-      if (g['Away Team']) activeTeams.add(g['Away Team']);
-    });
     
+    if (games.length > 0) {
+      games.forEach(g => {
+        if (g['Home Team']) activeTeams.add(String(g['Home Team']).toUpperCase().trim());
+        if (g['Away Team']) activeTeams.add(String(g['Away Team']).toUpperCase().trim());
+      });
+    }
+
     return modalPlayers
       .filter(p => {
-        const pTeam = p.team || p.Team;
+        const rawTeam = p.team || p.Team || "";
+        const pTeam = String(rawTeam).toUpperCase().trim();
         const teamMatch = activeTeams.has(pTeam);
         const name = (p.name || p.longName || p.Name || "").toLowerCase();
         const searchMatch = name.includes(searchTerm.toLowerCase());
         return teamMatch && searchMatch;
       })
-      .sort((a, b) => getPlayerProj(b) - getPlayerProj(a)); 
+      .sort((a, b) => {
+        const diff = getPlayerProj(b) - getPlayerProj(a);
+        if (diff !== 0) return diff;
+        const nameA = a.name || a.longName || "";
+        const nameB = b.name || b.longName || "";
+        return nameA.localeCompare(nameB);
+      });
   }, [modalPlayers, searchTerm, games, activeRound, leagueScoring]);
 
   // HANDLE SELECT PLAYER
@@ -431,7 +439,6 @@ export default function LeaguePage() {
     if (currentRoundIds.has(player.id) && lineup[selectedSlot!]?.id !== player.id) return;
     if (!selectedSlot || !userId) return;
     
-    // Check Locks
     if (isRoundLocked()) return;
     if (isGameLocked(player)) {
         alert("This game has already started! Selections are locked.");
@@ -452,7 +459,6 @@ export default function LeaguePage() {
     e.stopPropagation();
     if (!userId) return;
     
-    // Check Locks
     if (isRoundLocked()) return;
     if (player && isGameLocked(player)) {
         alert("Cannot remove player. Their game has already started.");
@@ -769,7 +775,13 @@ export default function LeaguePage() {
                         <div className="text-lg font-bold text-white">{leaguePrivacy}</div>
                     </div>
                     
-                    <div className="bg-slate-900/80 border border-slate-800 p-5 rounded-2xl flex flex-col gap-2 col-span-2 md:col-span-1 md:col-start-1">
+                    {/* NEW: JOIN CODE CARD */}
+                    <div className="bg-slate-900/80 border border-slate-800 p-5 rounded-2xl flex flex-col gap-2">
+                        <div className="flex items-center gap-2 text-[#22c55e] text-xs font-black uppercase tracking-widest"><Ticket size={14} /> Join Code</div>
+                        <div className="text-lg font-bold text-white font-mono tracking-widest">{joinCode}</div>
+                    </div>
+
+                    <div className="bg-slate-900/80 border border-slate-800 p-5 rounded-2xl flex flex-col gap-2 col-span-1">
                         <div className="flex items-center justify-between">
                             <div className="flex items-center gap-2 text-[#22c55e] text-xs font-black uppercase tracking-widest"><Key size={14} /> Password</div>
                             {isCommissioner && !isEditingPassword && (
@@ -832,11 +844,11 @@ export default function LeaguePage() {
       </div>
 
       {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#020617]/95 p-4 backdrop-blur-sm">
-          <div className="bg-slate-900 w-full max-w-xl rounded-[2rem] flex flex-col max-h-[85vh] border border-slate-700 shadow-2xl overflow-hidden animate-in zoom-in duration-200">
-            <div className="px-8 py-6 border-b border-slate-800 bg-slate-900/50">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#020617]/95 p-2 md:p-4 backdrop-blur-sm"> {/* Changed p-4 to p-2 md:p-4 */}
+          <div className="bg-slate-900 w-full max-w-xl rounded-2xl md:rounded-[2rem] flex flex-col h-[80vh] md:h-auto md:max-h-[85vh] border border-slate-700 shadow-2xl overflow-hidden animate-in zoom-in duration-200"> {/* Changed rounded and height */}
+            <div className="p-4 md:px-8 md:py-6 border-b border-slate-800 bg-slate-900/50"> {/* Reduced padding */}
               <div className="flex justify-between items-center mb-4"><h3 className="font-black text-white uppercase tracking-widest text-[10px] text-[#22c55e]">Selection: {selectedSlot}</h3><button onClick={() => setIsModalOpen(false)} className="text-slate-500 hover:text-white transition-colors">✕</button></div>
-              <div className="relative"><Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" size={14} /><input autoFocus placeholder="SEARCH PLAYERS..." className="w-full bg-slate-950 border border-slate-800 rounded-xl py-4 pl-12 pr-4 text-xs font-bold text-white uppercase tracking-widest focus:border-[#22c55e] outline-none transition-all" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} /></div>
+              <div className="relative"><Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" size={14} /><input autoFocus placeholder="SEARCH PLAYERS..." className="w-full bg-slate-950 border border-slate-800 rounded-xl py-3 pl-10 pr-4 text-base md:text-xs font-bold text-white uppercase tracking-widest focus:border-[#22c55e] outline-none transition-all placeholder:text-slate-600" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} /></div>
             </div>
             <div className="overflow-y-auto p-4 space-y-2 custom-scrollbar border-t border-slate-800/50">
               {filteredPlayersList.length === 0 && modalPlayers.length === 0 ? (<div className="p-10 text-center text-slate-500 text-xs font-bold uppercase tracking-widest">Loading available players...</div>) : (

@@ -11,11 +11,7 @@ export default function Home() {
       <div className="absolute inset-0 opacity-[0.03]" style={{ backgroundImage: `linear-gradient(#334155 1px, transparent 1px), linear-gradient(90deg, #334155 1px, transparent 1px)`, backgroundSize: '40px 40px' }} />
       <div className="absolute top-0 w-full h-[50vh] bg-gradient-to-b from-[#22c55e]/10 to-transparent blur-3xl pointer-events-none" />
 
-      {/* Nav */}
-      <nav className="relative z-10 px-6 py-6 flex justify-between items-center max-w-6xl mx-auto w-full">
-        <h1 className="text-xl font-black italic tracking-tighter uppercase">INVICTUS<span className="text-[#22c55e]">SPORTS</span></h1>
-        <Link href="/login" className="px-5 py-2 rounded-full border border-slate-700 text-xs font-bold hover:bg-white/5 transition-all">SIGN IN</Link>
-      </nav>
+      {/* REMOVED LOCAL NAV - Global Navbar from layout.tsx handles this now */}
 
       {/* Hero */}
       <main className="flex-1 flex flex-col items-center justify-center text-center px-4 relative z-10 mt-10 md:mt-0">
@@ -41,7 +37,7 @@ export default function Home() {
         </div>
       </main>
 
-{/* Features Grid - Mobile Stack */}
+      {/* Features Grid - Mobile Stack */}
       <section className="relative z-10 max-w-6xl mx-auto w-full px-6 py-20 flex flex-col items-center gap-12">
         
         {/* NEW HEADER */}
