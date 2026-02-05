@@ -400,7 +400,7 @@ export default function PigskinView({ leagueData }: PigskinViewProps) {
                 <div className="flex bg-slate-900/50 p-1 rounded-xl border border-slate-800">
                     <button onClick={() => setActiveTab('game')} className={`flex-1 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${activeTab === 'game' ? 'bg-orange-500 text-[#020617] shadow-lg' : 'text-slate-500 hover:text-white'}`}>
                         {/* CHANGED ICON AND TEXT HERE */}
-                        <Gamepad2 size={14} /> Scoreboard
+                        <Trophy size={14} /> Scoreboard
                     </button>
                     <button onClick={() => setActiveTab('log')} className={`flex-1 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${activeTab === 'log' ? 'bg-orange-500 text-[#020617] shadow-lg' : 'text-slate-500 hover:text-white'}`}><ScrollText size={14} /> Log</button>
                     <button onClick={() => setActiveTab('tiers')} className={`flex-1 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${activeTab === 'tiers' ? 'bg-orange-500 text-[#020617] shadow-lg' : 'text-slate-500 hover:text-white'}`}><Layers size={14} /> Tiers</button>
