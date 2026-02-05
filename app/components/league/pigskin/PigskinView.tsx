@@ -1,9 +1,9 @@
 ﻿'use client';
 
 import { useState, useEffect } from 'react';
-import { collection, onSnapshot, query, orderBy, limit, serverTimestamp, doc, writeBatch, getDoc } from 'firebase/firestore'; 
+import { collection, onSnapshot, query, orderBy, limit, serverTimestamp, doc, writeBatch } from 'firebase/firestore'; 
 import { db } from '@/lib/firebase'; 
-import { ChevronLeft, Trophy, Layers, Sparkles, ScrollText, Users, Flame, Play, Ban, Stethoscope, Info, Copy, Check, Globe, Lock, AlertTriangle } from 'lucide-react';
+import { ChevronLeft, Trophy, Layers, Sparkles, ScrollText, Users, Flame, Play, Ban, Stethoscope, Info, Copy, Check, Globe, Lock, AlertTriangle, LayoutDashboard } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 
@@ -50,12 +50,24 @@ export default function PigskinView({ leagueData }: PigskinViewProps) {
 
   // --- DATA FETCHING ---
   
-  // 1. Members
+  // 1. Members & Commissioner Check
   useEffect(() => {
     if (!leagueData?.id) return;
     const membersRef = collection(db, 'leagues', leagueData.id, 'Members');
     const unsubscribe = onSnapshot(membersRef, (snapshot) => {
         const fetchedMembers = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+        
+        // --- FIXED: Find Commissioner from Members List ---
+        // Instead of fetching from 'users' (which might fail permissions), we find them here.
+        if (leagueData.ownerId) {
+            const owner = fetchedMembers.find((m: any) => m.id === leagueData.ownerId);
+            if (owner) {
+                setCommissionerName(owner.username || 'Commissioner');
+            } else {
+                setCommissionerName('Unknown');
+            }
+        }
+
         const sorted = fetchedMembers.sort((a: any, b: any) => {
             const orderA = a.queueOrder ?? 999;
             const orderB = b.queueOrder ?? 999;
@@ -68,7 +80,7 @@ export default function PigskinView({ leagueData }: PigskinViewProps) {
         console.error("Error fetching members:", error);
     });
     return () => unsubscribe();
-  }, [leagueData?.id]);
+  }, [leagueData?.id, leagueData?.ownerId]); // Added ownerId dependency
 
   // 2. Logs
   useEffect(() => {
@@ -98,34 +110,6 @@ export default function PigskinView({ leagueData }: PigskinViewProps) {
     });
     return () => unsubscribe();
   }, []);
-
-  // 4. FETCH COMMISSIONER
-  useEffect(() => {
-    const fetchCommissioner = async () => {
-        const ownerId = leagueData?.ownerId; 
-        
-        if (ownerId) {
-            try {
-                const userDoc = await getDoc(doc(db, 'users', ownerId));
-                if (userDoc.exists()) {
-                    const userData = userDoc.data();
-                    setCommissionerName(userData.username || userData.name || userData.email || 'Commissioner');
-                } else {
-                    setCommissionerName('Unknown Commissioner');
-                }
-            } catch (error) {
-                console.warn("Could not fetch commissioner name:", error);
-                setCommissionerName('League Owner');
-            }
-        } else {
-            setCommissionerName('Unknown');
-        }
-    };
-
-    if (leagueData) {
-        fetchCommissioner();
-    }
-  }, [leagueData?.ownerId]);
 
   const copyLeagueCode = () => {
     if (leagueData?.joinCode) {
@@ -220,7 +204,6 @@ export default function PigskinView({ leagueData }: PigskinViewProps) {
             </div>
         </div>
 
-        {/* ADDED: Note about randomization */}
         <div className="flex items-center justify-center gap-2 p-2 bg-yellow-500/10 border border-yellow-500/20 rounded-lg">
             <AlertTriangle size={12} className="text-yellow-500" />
             <span className="text-[10px] font-bold text-yellow-500 uppercase tracking-wide">Player order will be randomized before kickoff</span>
@@ -412,7 +395,10 @@ export default function PigskinView({ leagueData }: PigskinViewProps) {
 
             <div className="md:hidden max-w-2xl mx-auto px-4 pb-2">
                 <div className="flex bg-slate-900/50 p-1 rounded-xl border border-slate-800">
-                    <button onClick={() => setActiveTab('game')} className={`flex-1 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${activeTab === 'game' ? 'bg-orange-500 text-[#020617] shadow-lg' : 'text-slate-500 hover:text-white'}`}><Users size={14} /> Game</button>
+                    <button onClick={() => setActiveTab('game')} className={`flex-1 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${activeTab === 'game' ? 'bg-orange-500 text-[#020617] shadow-lg' : 'text-slate-500 hover:text-white'}`}>
+                        {/* CHANGED: Replaced Users icon with LayoutDashboard and renamed "Game" to "Scoreboard" */}
+                        <LayoutDashboard size={14} /> Scoreboard
+                    </button>
                     <button onClick={() => setActiveTab('log')} className={`flex-1 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${activeTab === 'log' ? 'bg-orange-500 text-[#020617] shadow-lg' : 'text-slate-500 hover:text-white'}`}><ScrollText size={14} /> Log</button>
                     <button onClick={() => setActiveTab('tiers')} className={`flex-1 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${activeTab === 'tiers' ? 'bg-orange-500 text-[#020617] shadow-lg' : 'text-slate-500 hover:text-white'}`}><Layers size={14} /> Tiers</button>
                     <button onClick={() => setActiveTab('info')} className={`flex-1 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${activeTab === 'info' ? 'bg-orange-500 text-[#020617] shadow-lg' : 'text-slate-500 hover:text-white'}`}><Info size={14} /></button>
