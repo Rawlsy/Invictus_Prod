@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { collection, onSnapshot, query, orderBy, limit, serverTimestamp, doc, writeBatch } from 'firebase/firestore'; 
 import { db } from '@/lib/firebase'; 
-import { ChevronLeft, Trophy, Layers, Sparkles, ScrollText, Users, Flame, Play, Ban, Stethoscope, Info, Copy, Check, Globe, Lock, AlertTriangle, LayoutDashboard } from 'lucide-react';
+import { ChevronLeft, Trophy, Layers, Sparkles, ScrollText, Users, Flame, Play, Ban, Stethoscope, Info, Copy, Check, Globe, Lock, AlertTriangle, Gamepad2 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 
@@ -55,17 +55,20 @@ export default function PigskinView({ leagueData }: PigskinViewProps) {
     if (!leagueData?.id) return;
     const membersRef = collection(db, 'leagues', leagueData.id, 'Members');
     const unsubscribe = onSnapshot(membersRef, (snapshot) => {
-        // FIX: Explicitly type as any[] to avoid TypeScript build errors
         const fetchedMembers: any[] = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
         
-        // Find Commissioner from Members List
+        // --- FIXED OWNER LOOKUP ---
         if (leagueData.ownerId) {
+            // Find member where the document ID matches the ownerId
             const owner = fetchedMembers.find((m) => m.id === leagueData.ownerId);
             if (owner) {
-                setCommissionerName(owner.username || 'Commissioner');
+                // Try different possible name fields
+                setCommissionerName(owner.username || owner.displayName || owner.name || 'Commissioner');
             } else {
                 setCommissionerName('Unknown');
             }
+        } else {
+            setCommissionerName('Commissioner');
         }
 
         const sorted = fetchedMembers.sort((a: any, b: any) => {
@@ -396,8 +399,8 @@ export default function PigskinView({ leagueData }: PigskinViewProps) {
             <div className="md:hidden max-w-2xl mx-auto px-4 pb-2">
                 <div className="flex bg-slate-900/50 p-1 rounded-xl border border-slate-800">
                     <button onClick={() => setActiveTab('game')} className={`flex-1 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${activeTab === 'game' ? 'bg-orange-500 text-[#020617] shadow-lg' : 'text-slate-500 hover:text-white'}`}>
-                        {/* Renamed "Game" to "Scoreboard" on mobile */}
-                        <LayoutDashboard size={14} /> Scoreboard
+                        {/* CHANGED ICON AND TEXT HERE */}
+                        <Gamepad2 size={14} /> Scoreboard
                     </button>
                     <button onClick={() => setActiveTab('log')} className={`flex-1 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${activeTab === 'log' ? 'bg-orange-500 text-[#020617] shadow-lg' : 'text-slate-500 hover:text-white'}`}><ScrollText size={14} /> Log</button>
                     <button onClick={() => setActiveTab('tiers')} className={`flex-1 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${activeTab === 'tiers' ? 'bg-orange-500 text-[#020617] shadow-lg' : 'text-slate-500 hover:text-white'}`}><Layers size={14} /> Tiers</button>
