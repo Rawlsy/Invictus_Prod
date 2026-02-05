@@ -52,7 +52,7 @@ export default function HowToPlay() {
                     <span className="text-green-500 font-black">1</span>
                 </div>
                 <h3 className="font-bold text-white mb-2">Hold the Pigskin</h3>
-                <p className="text-xs text-slate-500 leading-relaxed">Avoid "Burns" (Receptions, Rush Attempts or Sacks by your players). When a player is burned, pigskin holder will move to bottom of queue and the next player is up!</p>
+                <p className="text-xs text-slate-500 leading-relaxed">The Pigskin holder will receive 3 players, 1 from each tier. These players are randomly assigned at each turn. To Keep your turn you will want to avoid "Burns" (Receptions, Rush Attempts or Sacks by your players). When a player is burned, pigskin holder will move to bottom of queue and the next player is up!</p>
             </div>
             <div className="p-6 rounded-2xl bg-slate-900/30 border border-slate-800/50">
                 <div className="w-10 h-10 mx-auto bg-orange-500/10 rounded-full flex items-center justify-center mb-4">
