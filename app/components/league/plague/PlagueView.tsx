@@ -2,33 +2,33 @@
 
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { doc, setDoc, updateDoc, deleteField, onSnapshot, collection, getDocs, query, where, documentId, limit } from 'firebase/firestore'; 
+import { doc, setDoc, updateDoc, deleteField, onSnapshot, collection, getDocs, query, where, documentId, limit, getDoc } from 'firebase/firestore'; 
 import { onAuthStateChanged, User } from 'firebase/auth'; 
 import { db, auth } from '@/lib/firebase'; 
 import { Lock, Search, ChevronLeft, Trash2, AlertCircle, Trophy, Share2, Copy, Check, Users, Shield, Crown, Key, Edit2, Save, X, Ticket } from 'lucide-react'; 
 
-const DB_LINEUP_KEYS = {
+const DB_LINEUP_KEYS: Record<string, string> = {
   wildcard: "Wild Card Lineup",
   divisional: "Divisional Lineup",
   conference: "Conference Lineup",
   superbowl: "Super Bowl Lineup"
 };
 
-const ROUND_TO_DB_MAP = {
+const ROUND_TO_DB_MAP: Record<string, string> = {
   wildcard: "WildCard",
   divisional: "Divisional",
   conference: "Conference",
   superbowl: "Superbowl"
 };
 
-const ROUND_TO_WEEK_NUM = {
+const ROUND_TO_WEEK_NUM: Record<string, string> = {
   wildcard: "19",
   divisional: "20",
   conference: "21",
   superbowl: "22"
 };
 
-const ROUND_TO_WEEK_PATH = {
+const ROUND_TO_WEEK_PATH: Record<string, string> = {
   wildcard: "Week 19",
   divisional: "Week 20",
   conference: "Week 21",
@@ -53,7 +53,11 @@ const POSITIONS = [
   { id: 'DEF', name: 'Defense', label: 'DEF' }
 ];
 
-export default function LeaguePage() {
+interface StandardViewProps {
+    leagueData: any;
+}
+
+export default function StandardView({ leagueData }: StandardViewProps) {
   const params = useParams();
   const router = useRouter(); 
   
@@ -69,6 +73,8 @@ export default function LeaguePage() {
   const [currentRoundIds, setCurrentRoundIds] = useState<Set<string>>(new Set());
   
   const [systemWeek, setSystemWeek] = useState<string | null>(null);
+  
+  // Data from Props
   const [leagueName, setLeagueName] = useState("Loading...");
   const [leagueScoring, setLeagueScoring] = useState("PPR"); 
   const [ownerId, setOwnerId] = useState<string | null>(null);
@@ -121,33 +127,25 @@ export default function LeaguePage() {
     return () => unsubscribe();
   }, []);
 
-  // LEAGUE DETAILS FETCH
+  // LEAGUE DETAILS FROM PROPS (Replaces fetch)
   useEffect(() => {
-    if (!params.id) return;
-    const leagueDocRef = doc(db, 'leagues', params.id as string);
-    const unsubscribe = onSnapshot(leagueDocRef, (docSnap) => {
-      if (docSnap.exists()) {
-        const data = docSnap.data();
-        setLeagueName(data.name || "Untitled League");
-        setOwnerId(data.ownerId || null);
-        setLeaguePrivacy(data.privacy || "Private");
-        setJoinCode(data.joinCode || "N/A"); 
+    if (leagueData) {
+        setLeagueName(leagueData.name || "Untitled League");
+        setOwnerId(leagueData.ownerId || null);
+        setLeaguePrivacy(leagueData.privacy || "Private");
+        setJoinCode(leagueData.joinCode || "N/A"); 
         
-        if (data.password && data.password.length > 0) {
-            setLeaguePassword(data.password);
+        if (leagueData.password && leagueData.password.length > 0) {
+            setLeaguePassword(leagueData.password);
         } else {
             setLeaguePassword("None");
         }
 
-        let scoreType = data.scoringType || data.scoring || "PPR";
+        let scoreType = leagueData.scoringType || leagueData.scoring || "PPR";
         if (scoreType === "Half PPR") scoreType = "Half-PPR"; 
         setLeagueScoring(scoreType); 
-      } else {
-        setLeagueName("League Not Found");
-      }
-    });
-    return () => unsubscribe();
-  }, [params.id]);
+    }
+  }, [leagueData]);
 
   // 1. FETCH GAMES
   useEffect(() => {
@@ -210,7 +208,7 @@ export default function LeaguePage() {
         const prevIds = new Set<string>();
         Object.keys(DB_LINEUP_KEYS).forEach(roundKey => {
             if (roundKey === activeRound) return;
-            const dbKey = DB_LINEUP_KEYS[roundKey as keyof typeof DB_LINEUP_KEYS];
+            const dbKey = DB_LINEUP_KEYS[roundKey];
             const roundData = data[dbKey] || {};
             Object.values(roundData).forEach((pid: any) => {
                 if (typeof pid === 'string' && pid) prevIds.add(pid);
@@ -241,7 +239,7 @@ export default function LeaguePage() {
             
             const hydrated: Record<string, any> = {};
             Object.keys(currentRoundLineup).forEach(slot => {
-                const pid = currentRoundLineup[slot];
+                const pid = currentRoundLineup[slot] as string;
                 const playerObj = fetchedPlayers.find(p => p.id === pid);
                 if (playerObj) hydrated[slot] = playerObj;
             });
@@ -327,7 +325,7 @@ export default function LeaguePage() {
 
   const getRoundStatus = (roundKey: string) => {
     if (!systemWeek) return 'loading';
-    const roundWeekNum = Number(ROUND_TO_WEEK_NUM[roundKey as keyof typeof ROUND_TO_WEEK_NUM]);
+    const roundWeekNum = Number(ROUND_TO_WEEK_NUM[roundKey]);
     const currentWeekNum = Number(systemWeek);
 
     if (roundWeekNum < currentWeekNum) return 'past'; 
@@ -603,7 +601,7 @@ export default function LeaguePage() {
                                 else if (status === 'active') statusColor = 'text-[#22c55e] hover:text-white border border-[#22c55e]/30';
                                 return (
                                     <button key={r} onClick={() => setActiveRound(r as any)} className={`flex items-center justify-center gap-2 py-3 px-4 rounded-lg text-[10px] md:text-xs font-black uppercase tracking-widest transition-all w-full md:w-auto ${statusColor}`}>
-                                        {isLocked && <Lock size={12} />} {!isLocked && isActive && <span className="w-2 h-2 rounded-full bg-[#22c55e] animate-pulse"/>} {r}
+                                            {isLocked && <Lock size={12} />} {!isLocked && isActive && <span className="w-2 h-2 rounded-full bg-[#22c55e] animate-pulse"/>} {r}
                                     </button>
                                 )
                             })}
@@ -775,7 +773,6 @@ export default function LeaguePage() {
                         <div className="text-lg font-bold text-white">{leaguePrivacy}</div>
                     </div>
                     
-                    {/* NEW: JOIN CODE CARD */}
                     <div className="bg-slate-900/80 border border-slate-800 p-5 rounded-2xl flex flex-col gap-2">
                         <div className="flex items-center gap-2 text-[#22c55e] text-xs font-black uppercase tracking-widest"><Ticket size={14} /> Join Code</div>
                         <div className="text-lg font-bold text-white font-mono tracking-widest">{joinCode}</div>
