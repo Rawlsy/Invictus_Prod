@@ -55,12 +55,12 @@ export default function PigskinView({ leagueData }: PigskinViewProps) {
     if (!leagueData?.id) return;
     const membersRef = collection(db, 'leagues', leagueData.id, 'Members');
     const unsubscribe = onSnapshot(membersRef, (snapshot) => {
-        const fetchedMembers = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+        // FIX: Explicitly type as any[] to avoid TypeScript build errors
+        const fetchedMembers: any[] = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
         
-        // --- FIXED: Find Commissioner from Members List ---
-        // Instead of fetching from 'users' (which might fail permissions), we find them here.
+        // Find Commissioner from Members List
         if (leagueData.ownerId) {
-            const owner = fetchedMembers.find((m: any) => m.id === leagueData.ownerId);
+            const owner = fetchedMembers.find((m) => m.id === leagueData.ownerId);
             if (owner) {
                 setCommissionerName(owner.username || 'Commissioner');
             } else {
@@ -80,7 +80,7 @@ export default function PigskinView({ leagueData }: PigskinViewProps) {
         console.error("Error fetching members:", error);
     });
     return () => unsubscribe();
-  }, [leagueData?.id, leagueData?.ownerId]); // Added ownerId dependency
+  }, [leagueData?.id, leagueData?.ownerId]);
 
   // 2. Logs
   useEffect(() => {
@@ -396,7 +396,7 @@ export default function PigskinView({ leagueData }: PigskinViewProps) {
             <div className="md:hidden max-w-2xl mx-auto px-4 pb-2">
                 <div className="flex bg-slate-900/50 p-1 rounded-xl border border-slate-800">
                     <button onClick={() => setActiveTab('game')} className={`flex-1 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${activeTab === 'game' ? 'bg-orange-500 text-[#020617] shadow-lg' : 'text-slate-500 hover:text-white'}`}>
-                        {/* CHANGED: Replaced Users icon with LayoutDashboard and renamed "Game" to "Scoreboard" */}
+                        {/* Renamed "Game" to "Scoreboard" on mobile */}
                         <LayoutDashboard size={14} /> Scoreboard
                     </button>
                     <button onClick={() => setActiveTab('log')} className={`flex-1 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${activeTab === 'log' ? 'bg-orange-500 text-[#020617] shadow-lg' : 'text-slate-500 hover:text-white'}`}><ScrollText size={14} /> Log</button>
