@@ -290,26 +290,36 @@ export default function Hub() {
           <div className="text-center py-20 text-slate-500 text-xs font-bold uppercase animate-pulse">Loading Hub...</div>
         ) : filteredLeagues.length > 0 ? (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {filteredLeagues.map((league) => (
-              <Link href={`/league/${league.id}`} key={league.id} className={`group relative bg-slate-900/60 border border-slate-800 p-6 rounded-2xl transition-all hover:bg-slate-900 ${isPigskin ? 'hover:border-orange-500/50' : 'hover:border-[#22c55e]/50'}`}>
-                <div className={`absolute top-6 right-6 text-slate-600 transition-colors ${isPigskin ? 'group-hover:text-orange-500' : 'group-hover:text-[#22c55e]'}`}>
-                  <ChevronRight size={20} />
-                </div>
-                <div className={`w-12 h-12 rounded-xl flex items-center justify-center border mb-4 transition-colors ${
-                    isPigskin 
-                    ? 'bg-orange-950/30 border-orange-900 group-hover:border-orange-500/30 text-orange-500' 
-                    : 'bg-slate-950 border-slate-800 group-hover:border-[#22c55e]/30 text-slate-400 group-hover:text-white'
-                }`}>
-                  <Trophy size={20} />
-                </div>
-                <h3 className={`text-lg font-bold text-white mb-1 transition-colors ${isPigskin ? 'group-hover:text-orange-500' : 'group-hover:text-[#22c55e]'}`}>{league.name}</h3>
-                <div className="flex gap-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider">
-                  <span>{isPigskin ? `${league.maxPlayers || 'No Limit'} Max` : (league.scoringType || 'PPR')}</span>
-                  <span>•</span>
-                  <span>{league.memberCount || 0} Members</span>
-                </div>
-              </Link>
-            ))}
+            {filteredLeagues.map((league) => {
+                // Determine the glow color based on the game mode of each specific league card
+                // However, since we filter by activeMode, we can use the 'isPigskin' logic too, 
+                // but checking the league's own property is safer if you ever show mixed lists.
+                const isThisLeaguePigskin = (league.sport === 'NFL' && league.gameMode === 'pigskin');
+                const glowClass = isThisLeaguePigskin 
+                    ? 'shadow-[0_0_20px_-5px_rgba(249,115,22,0.3)] hover:shadow-[0_0_30px_-5px_rgba(249,115,22,0.5)] border-orange-500/30' 
+                    : 'shadow-[0_0_20px_-5px_rgba(34,197,94,0.3)] hover:shadow-[0_0_30px_-5px_rgba(34,197,94,0.5)] border-[#22c55e]/30';
+
+                return (
+                    <Link href={`/league/${league.id}`} key={league.id} className={`group relative bg-slate-900/80 border p-6 rounded-2xl transition-all duration-300 hover:scale-[1.02] ${glowClass}`}>
+                        <div className={`absolute top-6 right-6 text-slate-600 transition-colors ${isThisLeaguePigskin ? 'group-hover:text-orange-500' : 'group-hover:text-[#22c55e]'}`}>
+                        <ChevronRight size={20} />
+                        </div>
+                        <div className={`w-12 h-12 rounded-xl flex items-center justify-center border mb-4 transition-colors ${
+                            isThisLeaguePigskin 
+                            ? 'bg-orange-950/30 border-orange-900 group-hover:border-orange-500/30 text-orange-500' 
+                            : 'bg-slate-950 border-slate-800 group-hover:border-[#22c55e]/30 text-slate-400 group-hover:text-white'
+                        }`}>
+                        <Trophy size={20} />
+                        </div>
+                        <h3 className={`text-lg font-bold text-white mb-1 transition-colors ${isThisLeaguePigskin ? 'group-hover:text-orange-500' : 'group-hover:text-[#22c55e]'}`}>{league.name}</h3>
+                        <div className="flex gap-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                        <span>{isThisLeaguePigskin ? `${league.maxPlayers || 'No Limit'} Max` : (league.scoringType || 'PPR')}</span>
+                        <span>•</span>
+                        <span>{league.memberCount || 0} Members</span>
+                        </div>
+                    </Link>
+                );
+            })}
             
             <button 
                 onClick={() => setShowCreateModal(true)}
