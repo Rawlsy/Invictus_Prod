@@ -291,9 +291,6 @@ export default function Hub() {
         ) : filteredLeagues.length > 0 ? (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {filteredLeagues.map((league) => {
-                // Determine the glow color based on the game mode of each specific league card
-                // However, since we filter by activeMode, we can use the 'isPigskin' logic too, 
-                // but checking the league's own property is safer if you ever show mixed lists.
                 const isThisLeaguePigskin = (league.sport === 'NFL' && league.gameMode === 'pigskin');
                 const glowClass = isThisLeaguePigskin 
                     ? 'shadow-[0_0_20px_-5px_rgba(249,115,22,0.3)] hover:shadow-[0_0_30px_-5px_rgba(249,115,22,0.5)] border-orange-500/30' 
@@ -321,13 +318,24 @@ export default function Hub() {
                 );
             })}
             
-            <button 
-                onClick={() => setShowCreateModal(true)}
-                className="border-2 border-dashed border-slate-800 rounded-2xl p-6 flex flex-col items-center justify-center gap-3 text-slate-500 hover:text-white hover:border-slate-600 transition-all min-h-[160px]"
-            >
-              <Plus size={24} />
-              <span className="text-xs font-bold uppercase tracking-widest">Create New League</span>
-            </button>
+            {/* GRID VIEW CREATE BUTTON */}
+            {activeMode === 'plague' ? (
+                <button 
+                    disabled
+                    className="border-2 border-dashed border-slate-800 rounded-2xl p-6 flex flex-col items-center justify-center gap-3 text-slate-600 cursor-not-allowed transition-all min-h-[160px]"
+                >
+                    <Lock size={24} />
+                    <span className="text-xs font-bold uppercase tracking-widest text-center">Come back for next years NFL playoffs.</span>
+                </button>
+            ) : (
+                <button 
+                    onClick={() => setShowCreateModal(true)}
+                    className="border-2 border-dashed border-slate-800 rounded-2xl p-6 flex flex-col items-center justify-center gap-3 text-slate-500 hover:text-white hover:border-slate-600 transition-all min-h-[160px]"
+                >
+                    <Plus size={24} />
+                    <span className="text-xs font-bold uppercase tracking-widest">Create New League</span>
+                </button>
+            )}
           </div>
         ) : (
             <div className="border border-slate-800 bg-slate-900/50 rounded-2xl p-8 text-center">
@@ -341,16 +349,27 @@ export default function Hub() {
                             {isPigskin ? <Flame size={32} /> : <Skull size={32} />}
                         </div>
                         <p className="text-slate-400 mb-4 font-bold">No {activeMode === 'pigskin' ? 'Pigskin' : 'Plague'} Leagues Found.</p>
-                        <button 
-                            onClick={() => setShowCreateModal(true)}
-                            className={`px-6 py-3 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${
-                                isPigskin 
-                                ? 'bg-orange-500 text-[#020617] hover:bg-orange-600' 
-                                : 'bg-[#22c55e] text-[#020617] hover:bg-[#16a34a]'
-                            }`}
-                        >
-                            Create New League
-                        </button>
+                        
+                        {/* EMPTY STATE CREATE BUTTON */}
+                        {activeMode === 'plague' ? (
+                            <button 
+                                disabled
+                                className="px-6 py-3 rounded-xl text-xs font-black uppercase tracking-widest transition-all bg-slate-800 text-slate-500 cursor-not-allowed"
+                            >
+                                Come back for next years NFL playoffs.
+                            </button>
+                        ) : (
+                            <button 
+                                onClick={() => setShowCreateModal(true)}
+                                className={`px-6 py-3 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${
+                                    isPigskin 
+                                    ? 'bg-orange-500 text-[#020617] hover:bg-orange-600' 
+                                    : 'bg-[#22c55e] text-[#020617] hover:bg-[#16a34a]'
+                                }`}
+                            >
+                                Create New League
+                            </button>
+                        )}
                     </>
                 )}
             </div>
