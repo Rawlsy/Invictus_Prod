@@ -8,7 +8,7 @@ const API_KEY = '85657f0983msh1fda8640dd67e05p1bb7bejsn3e59722b8c1e';
 const API_HOST = 'tank01-nfl-live-in-game-real-time-statistics-nfl.p.rapidapi.com';
 
 const SCORING_RULES = {
-  PASS_YD: 0.04, PASS_TD: 4, INT: -2, SACK: -1, 
+  PASS_YD: 0.04, PASS_TD: 6, INT: -2, SACK: -1, 
   RUSH_YD: 0.1, RUSH_TD: 6, REC_YD: 0.1, REC_TD: 6, 
   FUMBLE_LOST: -2, TWO_PT: 2,
   FG_MADE: 3, FG_MISSED: -1, XP_MADE: 1, XP_MISSED: -1,
@@ -29,7 +29,7 @@ const DST_ID_MAP: Record<string, string> = {
 
 // Points Allowed Tiers
 const getPointsAllowedScore = (pa: number | null) => {
-  if (pa === null) return 0; // No data = 0 pts
+  if (pa === null) return 0; 
   if (pa === 0) return 15;        
   if (pa >= 1 && pa <= 6) return 10; 
   if (pa >= 7 && pa <= 13) return 7; 
@@ -49,10 +49,41 @@ const clean = (val: any) => {
   return isNaN(num) ? 0 : num;
 };
 
-// Preserves null (critical for Points Allowed logic)
 const cleanNullable = (val: any) => {
     if (val === undefined || val === null || val === "") return null;
     return clean(val);
+};
+
+// --- HELPER: FIND 2PT IN STATS OBJECTS ---
+const get2PtFromStats = (obj: any) => {
+    if (!obj) return 0;
+    return clean(obj.twoPointConversions) || 
+           clean(obj.twoPointConv) || 
+           clean(obj.twoPtConv) || 
+           clean(obj.twoPt) ||
+           clean(obj.twoPointMade);
+};
+
+// --- HELPER: FIND 2PT IN SCORING PLAYS (TEXT PARSING) ---
+// Returns 1 if the player ID likely scored a 2PT conversion in the text summary
+const checkScoringPlaysFor2Pt = (scoringPlays: any[], player: any) => {
+    if (!scoringPlays || !Array.isArray(scoringPlays)) return 0;
+    
+    let foundCount = 0;
+    const pName = player.longName || `${player.firstName} ${player.lastName}`;
+    const pNameShort = `${player.firstName?.charAt(0)}.${player.lastName}`; // e.g. "C.Loveland"
+
+    scoringPlays.forEach(play => {
+        const desc = (play.scoreDetails || play.description || "").toLowerCase();
+        // Look for "2pt" or "two point" AND the player's name
+        if ((desc.includes('2pt') || desc.includes('two point')) && desc.includes('conversion')) {
+             if (desc.includes(pName.toLowerCase()) || desc.includes(pNameShort.toLowerCase())) {
+                 console.log(`[2PT FOUND IN TEXT] for ${pName}: ${desc}`);
+                 foundCount++;
+             }
+        }
+    });
+    return foundCount;
 };
 
 export async function GET(request: Request) {
@@ -96,7 +127,8 @@ export async function GET(request: Request) {
       
       const playerStats = boxData.body?.playerStats || {};
       const dstStats = boxData.body?.DST || {};
-      const teamStatsRaw = boxData.body?.teamStats || {}; // Fallback Source
+      const teamStatsRaw = boxData.body?.teamStats || {};
+      const scoringPlays = boxData.body?.scoringPlays || []; // Grab scoring plays
 
       // --- A. OFFENSE PLAYERS ---
       Object.values(playerStats).forEach((player: any) => {
@@ -118,7 +150,23 @@ export async function GET(request: Request) {
         const RecYds = clean(player.Receiving?.recYds || player.receiving?.recYds || player.Receiving?.recYards);
         const RecTD = clean(player.Receiving?.recTD || player.receiving?.recTD);
         const Fumbles = clean(player.Defense?.fumblesLost) + clean(player.Rushing?.fumblesLost) + clean(player.Receiving?.fumblesLost);
-        const TwoPt = clean(player.twoPointConversions); 
+        
+        // --- 2PT FIX: CHECK STATS + CHECK TEXT SUMMARY ---
+        let TwoPt = get2PtFromStats(player.Passing || player.passing) + 
+                    get2PtFromStats(player.Rushing || player.rushing) + 
+                    get2PtFromStats(player.Receiving || player.receiving) +
+                    get2PtFromStats(player.Scoring || player.scoring);
+
+        if (TwoPt === 0) {
+            TwoPt = get2PtFromStats(player); // Check root
+        }
+        
+        // Fallback: Check Scoring Plays Text
+        if (TwoPt === 0) {
+            const text2Pt = checkScoringPlaysFor2Pt(scoringPlays, player);
+            if (text2Pt > 0) TwoPt = text2Pt;
+        }
+
         const FGMade = clean(player.Kicking?.fgMade || player.kicking?.fgMade);
         const FGMissed = clean(player.Kicking?.fgMissed || player.kicking?.fgMissed);
         const XPMade = clean(player.Kicking?.xpMade || player.kicking?.xpMade);
@@ -167,10 +215,8 @@ export async function GET(request: Request) {
 
         const Sacks = clean(stats.sacks || stats.Sacks);
         
-        // CHECK ALL KEYS + FALLBACK TO TEAM STATS
         let Ints = clean(stats.interceptions || stats.Interceptions || stats.ints || stats.Ints || stats.defensiveInterceptions);
         
-        // FALLBACK: If fantasy object has 0 Ints, check the raw Box Score (teamStats)
         if (Ints === 0 && teamStatsRaw) {
             const side = isHome ? 'home' : 'away';
             const teamDefStats = teamStatsRaw[side]?.defense || {};
@@ -183,7 +229,6 @@ export async function GET(request: Request) {
         const BlockedKicks = clean(stats.blockedKicks || stats.BlockedKicks);
         const Def2Pt = clean(stats.defensiveTwoPointConversions || stats.twoPointConversions);
 
-        // Points Allowed Logic
         let PtsAllowed = cleanNullable(stats.pointsAllowed || stats.PointsAllowed);
         if (PtsAllowed === null) {
              const homeScore = clean(boxData.body?.lineScore?.home?.score || boxData.body?.homePts || game.homeScore);
@@ -203,10 +248,6 @@ export async function GET(request: Request) {
             (BlockedKicks * SCORING_RULES.DST_BLK_KICK) +
             (Def2Pt * SCORING_RULES.DST_RET_XP) +
             getPointsAllowedScore(PtsAllowed); 
-
-        // DEBUG LOG: Dumps all keys found in the object to console
-        console.log(`\n[DEBUG ${realAbv}] Keys Found: ${Object.keys(stats).join(', ')}`);
-        console.log(`[DEBUG ${realAbv}] Sacks:${Sacks} Ints:${Ints} Fumbles:${FumblesRec} TDs:${TDs} PtsAllowed:${PtsAllowed} -> TOTAL: ${defScore}`);
 
         const YdsAllowed = clean(stats.ydsAllowed || stats.YdsAllowed);
         const PtsAllowedDisplay = PtsAllowed === null ? 0 : PtsAllowed;
