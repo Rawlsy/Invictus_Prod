@@ -3,12 +3,12 @@ import { db } from '@/lib/firebaseAdmin';
 import { FieldValue } from 'firebase-admin/firestore';
 
 // --- CONFIGURATION ---
-//const TANK01_ENDPOINT = "https://tank01-nfl-live-in-game-real-time-statistics-nfl.p.rapidapi.com/getNFLBoxScore";
+const TANK01_ENDPOINT = "https://tank01-nfl-live-in-game-real-time-statistics-nfl.p.rapidapi.com/getNFLBoxScore";
 const GAME_ID = "20260208_NE@SEA"; 
 const API_KEY = "85657f0983msh1fda8640dd67e05p1bb7bejsn3e59722b8c1e"; 
 const CRON_SECRET = "pigskin_super_bowl_2026"; 
 
-export const maxDuration = 60; // Vercel Timeout Limit
+export const maxDuration = 60; 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: Request) {
@@ -20,11 +20,8 @@ export async function GET(request: Request) {
 
     console.log("⏰ Starting Ingest Loop (3x / 18s delay)...");
 
-    // --- LOOP: 3 Times x 18 Seconds ---
     for (let i = 0; i < 3; i++) {
         await performIngest();
-        
-        // Wait 18s if not the last iteration
         if (i < 2) {
             await new Promise(resolve => setTimeout(resolve, 18000));
         }
@@ -40,6 +37,7 @@ export async function GET(request: Request) {
 
 async function performIngest() {
     console.log(`📡 [${new Date().toISOString()}] Fetching Tank01 Data...`);
+    // Constants are now correctly scoped
     const url = `${TANK01_ENDPOINT}?gameID=${GAME_ID}&playByPlay=true&fantasyPoints=true&twoPointConversions=2&passYards=.04&passAttempts=0&passTD=4&passCompletions=0&passInterceptions=-2&pointsPerReception=.5&carries=.2&rushYards=.1&rushTD=6&fumbles=-2&receivingYards=.1&receivingTD=6&targets=0&defTD=6&fgMade=3&fgMissed=-3&xpMade=1&xpMissed=-1`;
     
     const options = {
