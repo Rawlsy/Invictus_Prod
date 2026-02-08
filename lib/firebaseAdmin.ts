@@ -1,7 +1,9 @@
 ﻿import * as admin from 'firebase-admin';
 
+// Check if Firebase is already initialized to prevent multiple instances
 if (!admin.apps.length) {
-  // 1. Check for Environment Variable (Production / Vercel)
+  
+  // OPTION 1: Production (Vercel) - Uses Environment Variable
   if (process.env.FIREBASE_SERVICE_ACCOUNT_KEY) {
     try {
       const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_KEY);
@@ -9,23 +11,29 @@ if (!admin.apps.length) {
         credential: admin.credential.cert(serviceAccount),
       });
     } catch (error) {
-      console.error('Firebase Admin Init Error: Invalid JSON in FIREBASE_SERVICE_ACCOUNT_KEY env var.');
+      console.error('❌ FIREBASE INIT ERROR: Could not parse FIREBASE_SERVICE_ACCOUNT_KEY env var.', error);
     }
   } 
-  // 2. Fallback for Local Development
+  
+  // OPTION 2: Local Development - Uses local file (Dynamic Import to avoid Vercel Build Errors)
   else {
     try {
-      // Attempt to load the local file. If it fails, that's okay in production (env var takes precedence).
-      // Note: Vercel will ignore this require if the file isn't there, or throw runtime error if env var is missing.
-      const serviceAccount = require('../Scripts/serviceAccountKey.json');
+      // We use a variable for the path so Vercel's bundler ignores this line during build
+      const localKeyPath = '../Scripts/serviceAccountKey.json'; 
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const serviceAccount = require(localKeyPath);
+      
       admin.initializeApp({
         credential: admin.credential.cert(serviceAccount),
       });
+      console.log("✅ Firebase Admin initialized via local file.");
     } catch (error) {
-      console.error('Firebase Admin Init Error: Missing FIREBASE_SERVICE_ACCOUNT_KEY env var or local json file.');
+      // In production, this error is expected if the Env Var is missing, but we log it to be sure.
+      console.error('❌ FIREBASE INIT ERROR: No Env Var found, and local file missing.');
     }
   }
 }
 
+// Export the database instance
 const db = admin.firestore();
 export { db };
