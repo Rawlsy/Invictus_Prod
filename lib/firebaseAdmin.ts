@@ -1,39 +1,61 @@
 ﻿import * as admin from 'firebase-admin';
+import { getApps } from 'firebase-admin/app';
+import fs from 'fs';
+import path from 'path';
 
-// Check if Firebase is already initialized to prevent multiple instances
-if (!admin.apps.length) {
-  
-  // OPTION 1: Production (Vercel) - Uses Environment Variable
-  if (process.env.FIREBASE_SERVICE_ACCOUNT_KEY) {
-    try {
-      const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_KEY);
-      admin.initializeApp({
-        credential: admin.credential.cert(serviceAccount),
-      });
-    } catch (error) {
-      console.error('❌ FIREBASE INIT ERROR: Could not parse FIREBASE_SERVICE_ACCOUNT_KEY env var.', error);
+// Prevent initializing the app multiple times (Next.js hot reload issue)
+if (!getApps().length) {
+    let serviceAccount: any = null;
+
+    // OPTION 1: Vercel / Production (Environment Variable)
+    if (process.env.FIREBASE_SERVICE_ACCOUNT_KEY) {
+        try {
+            serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_KEY);
+        } catch (error) {
+            console.error('❌ FIREBASE: Could not parse environment variable.');
+        }
+    } 
+    // OPTION 2: Local Development (Read File System)
+    else {
+        try {
+            // We use path.join and process.cwd() to construct the path at RUNTIME.
+            // This prevents Vercel's bundler from trying to include the file at BUILD time.
+            
+            // Try different common locations for the key
+            const possiblePaths = [
+                path.join(process.cwd(), 'app', 'serviceAccountKey.json'),
+                path.join(process.cwd(), 'Scripts', 'serviceAccountKey.json'),
+                path.join(process.cwd(), 'serviceAccountKey.json')
+            ];
+
+            for (const filePath of possiblePaths) {
+                if (fs.existsSync(filePath)) {
+                    const fileContent = fs.readFileSync(filePath, 'utf8');
+                    serviceAccount = JSON.parse(fileContent);
+                    console.log(`✅ FIREBASE: Loaded local key from ${filePath}`);
+                    break;
+                }
+            }
+        } catch (error) {
+            console.warn('⚠️ FIREBASE: Failed to load local service account file.');
+        }
     }
-  } 
-  
-  // OPTION 2: Local Development - Uses local file (Dynamic Import to avoid Vercel Build Errors)
-  else {
-    try {
-      // We use a variable for the path so Vercel's bundler ignores this line during build
-      const localKeyPath = '../Scripts/serviceAccountKey.json'; 
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const serviceAccount = require(localKeyPath);
-      
-      admin.initializeApp({
-        credential: admin.credential.cert(serviceAccount),
-      });
-      console.log("✅ Firebase Admin initialized via local file.");
-    } catch (error) {
-      // In production, this error is expected if the Env Var is missing, but we log it to be sure.
-      console.error('❌ FIREBASE INIT ERROR: No Env Var found, and local file missing.');
+
+    // INITIALIZE APP
+    if (serviceAccount) {
+        admin.initializeApp({
+            credential: admin.credential.cert(serviceAccount),
+        });
+    } else {
+        // Fallback for Build Time (Prevents Vercel build crash)
+        // If we are just building the app, we don't need real credentials yet.
+        console.warn('⚠️ FIREBASE: No credentials found. Initializing mock app for build.');
+        if (process.env.NODE_ENV === 'production') {
+             // Safe dummy init just to let "npm run build" finish
+             admin.initializeApp({ projectId: 'build-placeholder' }); 
+        }
     }
-  }
 }
 
-// Export the database instance
 const db = admin.firestore();
 export { db };
