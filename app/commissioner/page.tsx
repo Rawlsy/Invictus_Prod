@@ -30,14 +30,12 @@ const PLAYER_DB: Record<string, any> = {
     '4241478': { name: 'Antonio Gibson', team: 'NE', pos: 'RB', num: 4 },
     '4431526': { name: 'Kayshon Boutte', team: 'NE', pos: 'WR', num: 80 },
     '3052876': { name: 'Mack Hollins', team: 'NE', pos: 'WR', num: 13 },
-    '3931390': { name: 'Joey Slye', team: 'NE', pos: 'K', num: 9 },
     '4567048': { name: 'Kenneth Walker III', team: 'SEA', pos: 'RB', num: 9 },
     '4431566': { name: 'Jaxon Smith-Njigba', team: 'SEA', pos: 'WR', num: 11 },
     '3912547': { name: 'Sam Darnold', team: 'SEA', pos: 'QB', num: 14 },
     '2977187': { name: 'Cooper Kupp', team: 'SEA', pos: 'WR', num: 10 },
     '4426514': { name: 'George Holani', team: 'SEA', pos: 'RB', num: 28 },
-    '4431611': { name: 'AJ Barner', team: 'SEA', pos: 'TE', num: 88 },
-    '2473037': { name: 'Jason Myers', team: 'SEA', pos: 'K', num: 5 },
+    '4431611': { name: 'AJ Barner', team: 'SEA', pos: 'TE', num: 88 }
 };
 
 export default function CommissionerPage() {
