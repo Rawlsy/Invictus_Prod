@@ -261,7 +261,7 @@ const renderInfoContent = () => {
             </Link>
         </div>
     );
-};
+}; //test
 
   const renderGameContent = () => (
     <div className="space-y-4 animate-in fade-in duration-300">

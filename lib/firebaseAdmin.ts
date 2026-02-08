@@ -9,14 +9,18 @@ if (!getApps().length) {
     const envKey = process.env.FIREBASE_SERVICE_ACCOUNT_KEY;
 
     if (envKey) {
-      const serviceAccount = JSON.parse(envKey.replace(/\\n/g, '\n'));
+      // Robust parsing: handles both raw JSON strings and stringified JSON with escaped newlines
+      const serviceAccount = JSON.parse(
+        envKey.startsWith('{') ? envKey : envKey.replace(/\\n/g, '\n')
+      );
+
       admin.initializeApp({
         credential: admin.credential.cert(serviceAccount),
       });
       console.log("✅ Firebase Admin: Initialized via Environment Variable");
     } 
     else {
-      // 2. Local Fallback: Use an absolute path to the root of your A: drive project
+      // 2. Local Fallback: Use an absolute path to the root of your project
       const keyPath = path.join(process.cwd(), 'serviceAccountKey.json');
       
       if (fs.existsSync(keyPath)) {
@@ -26,11 +30,13 @@ if (!getApps().length) {
         });
         console.log(`✅ Firebase Admin: Initialized via ${keyPath}`);
       } else {
-        throw new Error(`Service account file not found at: ${keyPath}`);
+        // This is where Vercel was crashing—it couldn't find the file OR the env var.
+        throw new Error("Service account not found (Env Var missing and local file not found).");
       }
     }
   } catch (error: any) {
     console.error("❌ Firebase Admin Init Error:", error.message);
+    // Don't let the build crash here; the error will be caught by the route handler
   }
 }
 
