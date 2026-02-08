@@ -3,18 +3,18 @@ import { getApps } from 'firebase-admin/app';
 
 if (!getApps().length) {
   try {
-    // 1. Production Logic (Vercel)
+    // 1. Production (Vercel) Logic
     if (process.env.FIREBASE_PRIVATE_KEY) {
       admin.initializeApp({
         credential: admin.credential.cert({
           projectId: process.env.FIREBASE_PROJECT_ID,
           clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-          // Handles newline characters correctly for Vercel
+          // Corrects newline formatting for Vercel
           privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
         }),
       });
     } 
-    // 2. Localhost Logic (Your PC)
+    // 2. Localhost Logic
     else {
       // Corrected path: sits one level up from /lib
       const serviceAccount = require('../serviceAccountKey.json');
