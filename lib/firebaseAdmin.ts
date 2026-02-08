@@ -6,36 +6,26 @@ import fs from 'fs';
 if (!getApps().length) {
   try {
     const envKey = process.env.FIREBASE_SERVICE_ACCOUNT_KEY;
-
     if (envKey) {
-      const serviceAccount = JSON.parse(
-        envKey.startsWith('{') ? envKey : envKey.replace(/\\n/g, '\n')
-      );
-
-      admin.initializeApp({
-        credential: admin.credential.cert(serviceAccount),
-      });
-      console.log("✅ Firebase Admin: Initialized via Environment Variable");
-    } 
-    else {
+      const serviceAccount = JSON.parse(envKey.startsWith('{') ? envKey : envKey.replace(/\\n/g, '\n'));
+      admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
+    } else {
       const keyPath = path.join(process.cwd(), 'serviceAccountKey.json');
-      
       if (fs.existsSync(keyPath)) {
         const serviceAccount = JSON.parse(fs.readFileSync(keyPath, 'utf8'));
-        admin.initializeApp({
-          credential: admin.credential.cert(serviceAccount),
-        });
-        console.log(`✅ Firebase Admin: Initialized via ${keyPath}`);
+        admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
       } else {
-        // ⚠️ FIXED: Changed 'throw' to 'console.warn'
-        // This prevents Vercel from crashing during the build process.
-        console.warn("⚠️ Firebase Admin: Service account not found. Build will continue, but Firebase features will require the ENV KEY at runtime.");
+        console.warn("⚠️ Firebase Admin: No credentials. Skipping init for build.");
       }
     }
-  } catch (error: any) {
-    // ⚠️ FIXED: Added another safeguard here
-    console.error("❌ Firebase Admin Init Error:", error.message);
+  } catch (e) {
+    console.error("❌ Firebase Init Error:", e);
   }
 }
 
-export const db = admin.firestore();
+// 🛡️ This part prevents the "The default Firebase app does not exist" error during build
+export const db = getApps().length > 0 
+  ? admin.firestore() 
+  : ({ collection: () => ({ doc: () => ({ onSnapshot: () => {} }) }) } as any); 
+
+export { admin };
