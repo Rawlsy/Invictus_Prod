@@ -7,8 +7,8 @@ const GAME_ID = "20260208_NE@SEA";
 export const maxDuration = 60; 
 export const dynamic = 'force-dynamic';
 
-// --- CONFIGURATION: SHAHEED & KICKERS ADDED ---
-const TIERS = {
+// --- CONFIGURATION: SHAHEED & KICKERS INCLUDED ---
+const TIERS: Record<number, string[]> = {
     // TIER 1: Stars
     1: ['4431452', '4569173', '4567048', '4431566'],
     // TIER 2: Starters
@@ -16,25 +16,23 @@ const TIERS = {
     // TIER 3: Role Players & Special Teams
     3: [
         '4241478', '4431526', '3052876', '4431611', '3912547',
-        '4684940', // Rashid Shaheed (SEA - WR)
+        '4684940' // Rashid Shaheed (SEA - WR)
     ] 
 };
 
 export async function GET() {
   try {
-    console.log("⏰ Starting Sync Loop (4x / 14s delay)...");
+    // SINGLE-SHOT SYNC: No more loop.
+    // One ping from the script = One check of the database.
+    console.log("🔄 Sync Triggered...");
 
-    // --- LOOP: 4 Times x 14 Seconds = 56s Total ---
-    for (let i = 0; i < 4; i++) {
-        await performSync();
-        
-        // Wait 14s if not the last iteration
-        if (i < 3) {
-            await new Promise(resolve => setTimeout(resolve, 14000));
-        }
-    }
+    await performSync();
 
-    return NextResponse.json({ success: true, message: "Sync Loop Complete" });
+    return NextResponse.json({ 
+        success: true, 
+        message: "Sync processing complete",
+        timestamp: new Date().toISOString()
+    });
 
   } catch (error: any) {
     console.error("Sync Error:", error);
@@ -48,6 +46,9 @@ async function performSync() {
     const injuriesRef = db.collection('system').doc('pigskin_injuries');
     const leaguesRef = db.collection('leagues');
 
+    // ✅ FIXED SYNTAX:
+    // The variables are declared ONCE on the left.
+    // The promises are listed on the right WITHOUT any "=" signs.
     const [feedDoc, injuriesDoc, leaguesSnap] = await Promise.all([
         feedRef.get(),
         injuriesRef.get(),
@@ -63,6 +64,7 @@ async function performSync() {
     const batch = db.batch();
     let batchCount = 0;
 
+    // Now leaguesSnap.docs can be safely iterated
     for (const leagueDoc of leaguesSnap.docs) {
         const leagueId = leagueDoc.id;
         const leagueData = leagueDoc.data();
@@ -79,7 +81,6 @@ async function performSync() {
         const membersRef = leaguesRef.doc(leagueId).collection('Members');
         const membersSnap = await membersRef.get();
         
-        // Use : any[] to bypass strict TS check during Vercel build
         let members: any[] = membersSnap.docs.map(d => ({ id: d.id, ref: d.ref, ...d.data() }))
             .sort((a: any, b: any) => (parseInt(a.queueOrder) || 999) - (parseInt(b.queueOrder) || 999));
 
@@ -100,8 +101,16 @@ async function performSync() {
             const currentLineup = (Array.isArray(holder.lineup) && holder.lineup.length > 0) ? holder.lineup[holder.lineup.length - 1] : (holder.lineup || {});
             const myPlayerIds: string[] = currentLineup.players || [];
 
-            // Define isNullPlay for game flow (kickoffs, punts, etc.)
-            const isNullPlay = lowerDesc.includes('kickoff') || lowerDesc.includes('punt') || lowerDesc.includes('timeout') || lowerDesc.includes('end quarter') || lowerDesc.includes('end game');
+            // --- KICKING DATA DETECTION ---
+            // If any involved player has a "Kicking" stats block, it's a special teams play
+            const involvesKicking = Object.values(playerStats).some((stats: any) => stats && stats.Kicking);
+
+            const isNullPlay = 
+                involvesKicking || 
+                lowerDesc.includes('timeout') || 
+                lowerDesc.includes('end quarter') || 
+                lowerDesc.includes('end game') || 
+                lowerDesc.includes('touchback');
 
             let holderInvolved = false;
             if (!isNullPlay) {
@@ -121,7 +130,7 @@ async function performSync() {
             if (isNullPlay) {
                 pointsToAdd = 0;
                 logType = "neutral";
-                logMessage = "Game Update";
+                logMessage = "GAME UPDATE";
             } 
             else if (holderInvolved) {
                 if (lowerDesc.includes('touchdown')) {
@@ -161,7 +170,6 @@ async function performSync() {
                 batch.update(holder.ref, { lineup: [] });
                 batchCount++;
 
-                // Queue Rotation
                 const movingMember = members.shift();
                 if (movingMember) members.push(movingMember);
 
@@ -170,7 +178,6 @@ async function performSync() {
                     batchCount++;
                 });
 
-                // Deal New Hand (Injury Aware)
                 const newOnDeck = members[1];
                 if (newOnDeck) {
                     const p1 = TIERS[1].filter(id => !injuries.includes(id)).sort(() => 0.5 - Math.random())[0];
@@ -190,7 +197,7 @@ async function performSync() {
     }
 
     if (batchCount > 0) {
-        await batch.commit();
+        await batch.commit(); // Committed in a single atomic batch
         console.log(`   ✅ Committed ${batchCount} updates.`);
     }
 }

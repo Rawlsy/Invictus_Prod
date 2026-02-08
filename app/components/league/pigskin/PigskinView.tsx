@@ -51,6 +51,7 @@ export default function PigskinView({ leagueData }: PigskinViewProps) {
   const [copied, setCopied] = useState(false);
   const [commissionerName, setCommissionerName] = useState<string>('Loading...');
   const [gameFeed, setGameFeed] = useState<any>(null);
+  const [showPassword, setShowPassword] = useState(false);
 
   // --- FETCH MEMBERS ---
   useEffect(() => {
@@ -69,12 +70,9 @@ export default function PigskinView({ leagueData }: PigskinViewProps) {
     return () => unsubscribe();
   }, [leagueData?.id]);
 
-  // --- GLOBAL FEED ---
-  useEffect(() => {
-    const interval = setInterval(() => {
-        fetch('/api/pigskin/sync').catch(err => console.error("Sync trigger failed", err));
-    }, 5000); 
-
+// --- GLOBAL FEED ---
+useEffect(() => {
+    // interval removed - logic now driven by gameday-pinger.js
     const feedRef = doc(db, 'system', 'live_feed');
     const unsubscribe = onSnapshot(feedRef, (docSnap) => {
         if (docSnap.exists()) {
@@ -86,11 +84,8 @@ export default function PigskinView({ leagueData }: PigskinViewProps) {
         }
     });
 
-    return () => {
-        clearInterval(interval);
-        unsubscribe();
-    };
-  }, []);
+    return () => unsubscribe();
+}, []);
 
   // --- LEAGUE LOGS ---
   useEffect(() => {
@@ -188,19 +183,108 @@ export default function PigskinView({ leagueData }: PigskinViewProps) {
       return owner ? owner.username : null;
   };
 
-  const renderInfoContent = () => (
-    <div className="space-y-6 animate-in fade-in duration-300 max-w-2xl mx-auto pt-4">
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl">
-            <div className="bg-slate-800/50 p-4 border-b border-slate-700 flex items-center justify-between">
-                <h2 className="text-sm font-black uppercase tracking-widest text-white flex items-center gap-2"><Info size={16} className="text-orange-500" /> League Details</h2>
-                {leagueData?.privacy === 'Public' ? <span className="text-[10px] font-bold text-green-500 uppercase flex items-center gap-1"><Globe size={12} /> Public</span> : <span className="text-[10px] font-bold text-slate-500 uppercase flex items-center gap-1"><Lock size={12} /> Private</span>}
+const renderInfoContent = () => {
+    const leagueUrl = `https://invictussports.app/join/${leagueData?.joinCode}`;
+
+    const handleShare = async () => {
+        if (navigator.share) {
+            try {
+                await navigator.share({
+                    title: `Join my Pigskin League: ${leagueData?.name}`,
+                    text: `Enter my league "${leagueData?.name}" using code: ${leagueData?.joinCode}`,
+                    url: leagueUrl,
+                });
+            } catch (err) {
+                console.log('Share failed:', err);
+            }
+        } else {
+            // Fallback for desktop: Copy link to clipboard
+            navigator.clipboard.writeText(leagueUrl);
+            setCopied(true);
+            setTimeout(() => setCopied(false), 2000);
+        }
+    };
+
+    return (
+        <div className="space-y-4 animate-in fade-in duration-300 max-w-2xl mx-auto pt-4 pb-20">
+            {/* 1. Share League Action Card */}
+            <div className="bg-gradient-to-br from-orange-600 to-red-600 rounded-2xl p-5 shadow-xl shadow-orange-500/10">
+                <div className="flex items-center justify-between">
+                    <div className="space-y-1">
+                        <h3 className="text-sm font-black uppercase tracking-widest text-white">Recruit Members</h3>
+                        <p className="text-[10px] text-orange-100 font-bold opacity-80 italic">Invite others to join the chaos</p>
+                    </div>
+                    <button 
+                        onClick={handleShare}
+                        className="bg-white text-orange-600 px-5 py-2.5 rounded-xl font-black text-[10px] uppercase tracking-widest shadow-lg active:scale-90 transition-transform flex items-center gap-2"
+                    >
+                        <Play size={12} fill="currentColor" /> Share League
+                    </button>
+                </div>
             </div>
-            <div className="p-6 space-y-6">
-                <div className="space-y-2"><label className="text-[10px] font-black uppercase tracking-widest text-slate-500">League Join Code</label><div className="flex items-center gap-2"><div className="flex-1 bg-black/40 border border-slate-700 rounded-lg p-3 text-sm font-mono font-bold text-orange-400 tracking-wider">{leagueData?.joinCode || 'LOADING...'}</div><button onClick={copyLeagueCode} className="p-3 bg-slate-800 border border-slate-700 rounded-lg hover:bg-slate-700 transition-colors text-slate-400 hover:text-white">{copied ? <Check size={18} className="text-green-500" /> : <Layers size={18} />}</button></div></div>
+
+            {/* 2. Security & Credentials Card */}
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl">
+                <div className="bg-slate-800/50 p-4 border-b border-slate-700 flex items-center justify-between">
+                    <h2 className="text-sm font-black uppercase tracking-widest text-white flex items-center gap-2">
+                        <Lock size={16} className="text-orange-500" /> Access Keys
+                    </h2>
+                </div>
+                <div className="p-6 space-y-5">
+                    {/* Join Code Section */}
+                    <div className="space-y-2">
+                        <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 flex items-center gap-2">
+                            <Layers size={12} /> League Join Code
+                        </label>
+                        <div className="flex items-center gap-2">
+                            <div className="flex-1 bg-black/40 border border-slate-700 rounded-lg p-3 text-sm font-mono font-bold text-orange-400 tracking-wider">
+                                {leagueData?.joinCode || 'LOADING...'}
+                            </div>
+                            <button onClick={copyLeagueCode} className="p-3 bg-slate-800 border border-slate-700 rounded-lg hover:bg-slate-700 transition-colors text-slate-400">
+                                {copied ? <Check size={18} className="text-green-500" /> : <Layers size={18} />}
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* Password Section */}
+                    <div className="space-y-2">
+                        <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 flex items-center gap-2">
+                            <Users size={12} /> Entry Password
+                        </label>
+                        <div className="relative group">
+                            <div className="w-full bg-black/40 border border-slate-700 rounded-lg p-3 text-sm font-mono font-bold text-slate-300 tracking-wider flex items-center justify-between">
+                                <span>{showPassword ? (leagueData?.password || 'No Password') : '••••••••'}</span>
+                                <button 
+                                    onClick={() => setShowPassword(!showPassword)}
+                                    className="text-slate-500 hover:text-white transition-colors p-1"
+                                >
+                                    {showPassword ? <Ban size={16} /> : <Play size={16} fill="currentColor" className="rotate-90" />}
+                                </button>
+                            </div>
+                        </div>
+                        <p className="text-[9px] text-slate-600 font-bold uppercase italic">Only shared with current league members</p>
+                    </div>
+                </div>
             </div>
+
+            {/* 3. New to the game? Rules Link */}
+            <Link href="/how-to-play" className="block bg-slate-900/40 border border-slate-800/50 rounded-2xl p-4 hover:bg-slate-800/40 transition-colors">
+                <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-orange-500/10 flex items-center justify-center text-orange-500">
+                            <Gamepad2 size={20} />
+                        </div>
+                        <div>
+                            <h4 className="text-[10px] font-black uppercase tracking-widest text-white">Rulebook</h4>
+                            <p className="text-[9px] text-slate-500 font-bold">New to the game? See how it works.</p>
+                        </div>
+                    </div>
+                    <ChevronLeft size={16} className="rotate-180 text-slate-600" />
+                </div>
+            </Link>
         </div>
-    </div>
-  );
+    );
+};
 
   const renderGameContent = () => (
     <div className="space-y-4 animate-in fade-in duration-300">

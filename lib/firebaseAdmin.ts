@@ -1,35 +1,37 @@
 ﻿import * as admin from 'firebase-admin';
 import { getApps } from 'firebase-admin/app';
+import path from 'path';
+import fs from 'fs';
 
 if (!getApps().length) {
-  const envKey = process.env.FIREBASE_SERVICE_ACCOUNT_KEY;
+  try {
+    // 1. Check for Environment Variable first (For Production/Vercel)
+    const envKey = process.env.FIREBASE_SERVICE_ACCOUNT_KEY;
 
-  if (envKey) {
-    try {
-      const serviceAccount = JSON.parse(envKey);
+    if (envKey) {
+      const serviceAccount = JSON.parse(envKey.replace(/\\n/g, '\n'));
       admin.initializeApp({
         credential: admin.credential.cert(serviceAccount),
       });
-      console.log("✅ Firebase Admin initialized via Environment Variable.");
-    } catch (error) {
-      console.error("❌ FIREBASE: JSON.parse failed on FIREBASE_SERVICE_ACCOUNT_KEY.");
-      // Fallback if the string is already somehow an object or weirdly formatted
-      admin.initializeApp({
-        credential: admin.credential.cert(envKey as any),
-      });
+      console.log("✅ Firebase Admin: Initialized via Environment Variable");
+    } 
+    else {
+      // 2. Local Fallback: Use an absolute path to the root of your A: drive project
+      const keyPath = path.join(process.cwd(), 'serviceAccountKey.json');
+      
+      if (fs.existsSync(keyPath)) {
+        const serviceAccount = JSON.parse(fs.readFileSync(keyPath, 'utf8'));
+        admin.initializeApp({
+          credential: admin.credential.cert(serviceAccount),
+        });
+        console.log(`✅ Firebase Admin: Initialized via ${keyPath}`);
+      } else {
+        throw new Error(`Service account file not found at: ${keyPath}`);
+      }
     }
-  } else {
-    // If we are in production and this is missing, initialize a dummy to let the build pass
-    if (process.env.NODE_ENV === 'production') {
-      admin.initializeApp({
-        projectId: 'invictus-sports-placeholder', 
-      });
-      console.warn("⚠️ FIREBASE: Missing credentials in Production. Using placeholder.");
-    } else {
-      console.error("❌ FIREBASE: No environment variable found.");
-    }
+  } catch (error: any) {
+    console.error("❌ Firebase Admin Init Error:", error.message);
   }
 }
 
-const db = admin.firestore();
-export { db };
+export const db = admin.firestore();
