@@ -1,32 +1,31 @@
-﻿import admin from 'firebase-admin';
+﻿import * as admin from 'firebase-admin';
 
 if (!admin.apps.length) {
-  try {
-    // 1. PRODUCTION: Use Env Vars
-    if (process.env.FIREBASE_PROJECT_ID && process.env.FIREBASE_CLIENT_EMAIL && process.env.FIREBASE_PRIVATE_KEY) {
-        admin.initializeApp({
-            credential: admin.credential.cert({
-                projectId: process.env.FIREBASE_PROJECT_ID,
-                clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-                privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
-            }),
-        });
-    } 
-    // 2. LOCAL DEV: Use Key File
-    else {
-        // Note: Using a relative path to find the Scripts folder from "invictus/lib"
-        // Adjust "../Scripts" if your folder structure is different.
-        const serviceAccount = require('../Scripts/serviceAccountKey.json');
-        admin.initializeApp({
-            credential: admin.credential.cert(serviceAccount),
-        });
-        console.log("⚠️ Loaded Firebase Admin from local key file.");
+  // 1. Check for Environment Variable (Production / Vercel)
+  if (process.env.FIREBASE_SERVICE_ACCOUNT_KEY) {
+    try {
+      const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_KEY);
+      admin.initializeApp({
+        credential: admin.credential.cert(serviceAccount),
+      });
+    } catch (error) {
+      console.error('Firebase Admin Init Error: Invalid JSON in FIREBASE_SERVICE_ACCOUNT_KEY env var.');
     }
-  } catch (error) {
-    console.error("❌ Firebase Admin Initialization Error:", error);
+  } 
+  // 2. Fallback for Local Development
+  else {
+    try {
+      // Attempt to load the local file. If it fails, that's okay in production (env var takes precedence).
+      // Note: Vercel will ignore this require if the file isn't there, or throw runtime error if env var is missing.
+      const serviceAccount = require('../Scripts/serviceAccountKey.json');
+      admin.initializeApp({
+        credential: admin.credential.cert(serviceAccount),
+      });
+    } catch (error) {
+      console.error('Firebase Admin Init Error: Missing FIREBASE_SERVICE_ACCOUNT_KEY env var or local json file.');
+    }
   }
 }
 
-// This export style ensures 'db' has the .collection() method
 const db = admin.firestore();
 export { db };

@@ -7,9 +7,13 @@ const GAME_ID = "20260208_NE@SEA";
 export const maxDuration = 60; 
 export const dynamic = 'force-dynamic';
 
+// --- CONFIGURATION ---
 const TIERS = {
+    // TIER 1: Stars
     1: ['4431452', '4569173', '4567048', '4431566'],
+    // TIER 2: Starters
     2: ['2976212', '3046439', '5000001', '2977187', '4426514'],
+    // TIER 3: Role Players (KICKERS REMOVED)
     3: ['4241478', '4431526', '3052876', '4431611', '3912547'] 
 };
 
@@ -71,7 +75,9 @@ async function performSync() {
 
         const membersRef = leaguesRef.doc(leagueId).collection('Members');
         const membersSnap = await membersRef.get();
-        let members = membersSnap.docs.map(d => ({ id: d.id, ref: d.ref, ...d.data() }))
+        
+        // --- FIX: Added ': any[]' type to fix TypeScript build error ---
+        let members: any[] = membersSnap.docs.map(d => ({ id: d.id, ref: d.ref, ...d.data() }))
             .sort((a: any, b: any) => (parseInt(a.queueOrder) || 999) - (parseInt(b.queueOrder) || 999));
 
         if (members.length === 0) continue;
