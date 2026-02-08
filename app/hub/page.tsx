@@ -1,6 +1,7 @@
 ﻿'use client';
 
-import { useState, useEffect } from 'react';
+// 1. Added Suspense to the existing import line
+import { useState, useEffect, Suspense } from 'react';
 import { useRouter } from 'next/navigation';
 import { collection, query, where, onSnapshot, addDoc, doc, setDoc, serverTimestamp } from 'firebase/firestore'; 
 import { onAuthStateChanged } from 'firebase/auth';
@@ -179,7 +180,10 @@ export default function Hub() {
             <h2 className="text-3xl md:text-4xl font-black tracking-tight mb-2">Welcome Back, <br /> <span className="text-slate-500">{user?.displayName || 'Coach'}</span></h2>
           </div>
           <div className="w-full md:w-auto">
-             <JoinLeague />
+             {/* 2. Added Suspense wrapper for the new JoinLeague logic */}
+             <Suspense fallback={<div className="h-10 w-32 bg-slate-900 animate-pulse rounded-xl" />}>
+                <JoinLeague />
+             </Suspense>
           </div>
         </div>
 
@@ -309,10 +313,17 @@ export default function Hub() {
                         <Trophy size={20} />
                         </div>
                         <h3 className={`text-lg font-bold text-white mb-1 transition-colors ${isThisLeaguePigskin ? 'group-hover:text-orange-500' : 'group-hover:text-[#22c55e]'}`}>{league.name}</h3>
-                        <div className="flex gap-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider">
-                        <span>{isThisLeaguePigskin ? `${league.maxPlayers || 'No Limit'} Max` : (league.scoringType || 'PPR')}</span>
-                        <span>•</span>
-                        <span>{league.memberCount || 0} Members</span>
+                        
+                        {/* 3. Added the joinCode badge for easy sharing from the Hub */}
+                        <div className="flex items-center justify-between mt-2">
+                            <div className="flex gap-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                                <span>{isThisLeaguePigskin ? `${league.maxPlayers || 'No Limit'} Max` : (league.scoringType || 'PPR')}</span>
+                                <span>•</span>
+                                <span>{league.memberCount || 0} Members</span>
+                            </div>
+                            <div className={`px-2 py-1 rounded-md text-[10px] font-black font-mono border ${isThisLeaguePigskin ? 'bg-orange-500/10 border-orange-500/30 text-orange-400' : 'bg-green-500/10 border-green-500/30 text-green-400'}`}>
+                                {league.joinCode}
+                            </div>
                         </div>
                     </Link>
                 );
