@@ -63,7 +63,7 @@ export async function POST() {
         const batch = db.batch();
         let leagueUpdates = 0;
 
-        membersSnap.forEach((memDoc) => {
+        membersSnap.forEach((memDoc: any) => {
             const member = memDoc.data();
             const currentScores = member.scores || {};
             
