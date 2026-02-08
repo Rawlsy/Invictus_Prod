@@ -36,7 +36,7 @@ export async function POST() {
     const playersSnap = await playersRef.get();
     const playerStatsMap: Record<string, any> = {};
     
-    playersSnap.forEach(doc => {
+    playersSnap.forEach(doc: any) => {
         playerStatsMap[doc.id] = doc.data();
     });
     
