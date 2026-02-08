@@ -4,17 +4,16 @@ import { getApps } from 'firebase-admin/app';
 if (!getApps().length) {
   try {
     // 1. PRODUCTION (Vercel) - Uses Environment Variables
-    if (process.env.FIREBASE_PRIVATE_KEY) {
+if (process.env.FIREBASE_PRIVATE_KEY) {
   admin.initializeApp({
     credential: admin.credential.cert({
       projectId: process.env.FIREBASE_PROJECT_ID,
       clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-      // This regex is mandatory to convert the Vercel string into a valid key
+      // This is crucial for converting the Vercel string back into a real key
       privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
     }),
   });
-}
-    // 2. LOCALHOST ONLY - Uses the JSON file
+}    // 2. LOCALHOST ONLY - Uses the JSON file
     else if (process.env.NODE_ENV === 'development') {
       const serviceAccount = require('../serviceAccountKey.json');
       admin.initializeApp({
