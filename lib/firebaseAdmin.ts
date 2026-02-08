@@ -15,8 +15,8 @@ if (!getApps().length) {
     } 
     // 2. Fallback to local file for localhost
     else {
-// Change ../../ to ../
-      const serviceAccount = require('../serviceAccountKey.json');
+// Changed from '../../' to '../' to reach the root folder from /lib
+    const serviceAccount = require('../serviceAccountKey.json');
       admin.initializeApp({
         credential: admin.credential.cert(serviceAccount),
       });
