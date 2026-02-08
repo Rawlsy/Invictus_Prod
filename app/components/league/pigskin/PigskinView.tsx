@@ -13,7 +13,7 @@ interface PigskinViewProps {
     leagueData: any;
 }
 
-// --- CONFIG: DARNOLD IN TIER 3 ---
+// --- CONFIG: SHAHEED ADDED TO TIER 3 ---
 const PLAYER_DB: Record<string, any> = {
     '4431452': { name: 'Drake Maye', team: 'NE', pos: 'QB', num: 10, tier: 1 },
     '4569173': { name: 'Rhamondre Stevenson', team: 'NE', pos: 'RB', num: 38, tier: 1 },
@@ -23,14 +23,13 @@ const PLAYER_DB: Record<string, any> = {
     '4241478': { name: 'Antonio Gibson', team: 'NE', pos: 'RB', num: 4, tier: 3 },
     '4431526': { name: 'Kayshon Boutte', team: 'NE', pos: 'WR', num: 80, tier: 3 },
     '3052876': { name: 'Mack Hollins', team: 'NE', pos: 'WR', num: 13, tier: 3 },
-    '3931390': { name: 'Joey Slye', team: 'NE', pos: 'K', num: 9, tier: 3 },
     '4567048': { name: 'Kenneth Walker III', team: 'SEA', pos: 'RB', num: 9, tier: 1 },
     '4431566': { name: 'Jaxon Smith-Njigba', team: 'SEA', pos: 'WR', num: 11, tier: 1 },
     '3912547': { name: 'Sam Darnold', team: 'SEA', pos: 'QB', num: 14, tier: 3 }, 
     '2977187': { name: 'Cooper Kupp', team: 'SEA', pos: 'WR', num: 10, tier: 2 },
     '4426514': { name: 'George Holani', team: 'SEA', pos: 'RB', num: 28, tier: 2 },
     '4431611': { name: 'AJ Barner', team: 'SEA', pos: 'TE', num: 88, tier: 3 },
-    '2473037': { name: 'Jason Myers', team: 'SEA', pos: 'K', num: 5, tier: 3 }
+    '4684940': { name: 'Rashid Shaheed', team: 'SEA', pos: 'WR', num: 22, tier: 3 },
 };
 
 const TIERS_MENU = [
@@ -123,7 +122,6 @@ export default function PigskinView({ leagueData }: PigskinViewProps) {
   }, []);
 
   // --- SCORE CALCULATOR ---
-  // Calculates real-time score from the play-by-play array
   const { homeScore, awayScore } = useMemo(() => {
     let home = 0;
     let away = 0;
@@ -131,13 +129,13 @@ export default function PigskinView({ leagueData }: PigskinViewProps) {
     globalPlays.forEach(play => {
         const text = (play.play || "").toLowerCase();
         const stats = play.playerStats || {};
-        const pid = Object.keys(stats)[0]; // Primary player involved
+        const pid = Object.keys(stats)[0]; 
         const player = PLAYER_DB[pid];
 
-        if (!player) return; // Can't score if we don't know the team
+        if (!player) return; 
 
         let points = 0;
-        if (text.includes("touchdown")) points = 6; // TD is 6
+        if (text.includes("touchdown")) points = 6; 
         else if (text.includes("field goal") && text.includes("good")) points = 3;
         else if (text.includes("extra point") && text.includes("good")) points = 1;
         else if (text.includes("safety")) points = 2;
@@ -190,7 +188,6 @@ export default function PigskinView({ leagueData }: PigskinViewProps) {
       return owner ? owner.username : null;
   };
 
-  // ... (renderInfoContent same as before) ...
   const renderInfoContent = () => (
     <div className="space-y-6 animate-in fade-in duration-300 max-w-2xl mx-auto pt-4">
         <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl">
@@ -216,13 +213,11 @@ export default function PigskinView({ leagueData }: PigskinViewProps) {
                 </div>
                 {gameFeed ? (
                     <div className="relative z-10 flex items-center gap-4 bg-black/40 p-2 rounded-lg border border-white/10">
-                        {/* AWAY SCORE (SEA) */}
                         <div className="text-center">
                             <div className="text-2xl font-black text-white leading-none">{awayScore}</div>
                             <div className="text-[9px] font-bold text-slate-400 uppercase">SEA</div>
                         </div>
                         <div className="text-xs font-black text-orange-500">VS</div>
-                        {/* HOME SCORE (NE) */}
                         <div className="text-center">
                             <div className="text-2xl font-black text-white leading-none">{homeScore}</div>
                             <div className="text-[9px] font-bold text-slate-400 uppercase">NE</div>
@@ -253,7 +248,7 @@ export default function PigskinView({ leagueData }: PigskinViewProps) {
                         }
                     }
                 }
-                const players = rawPlayerIds.map(pid => PLAYER_DB[pid]).filter(Boolean).sort((a, b) => a.tier - b.tier);
+                const players = rawPlayerIds.map(pid => ({ ...PLAYER_DB[pid], id: pid })).filter(p => p.name).sort((a, b) => a.tier - b.tier);
 
                 if (!isQueue) {
                     const badgeColor = isPigskinHolder ? 'bg-gradient-to-r from-red-600 via-orange-500 to-red-600 text-white shadow-lg' : 'bg-yellow-500/20 text-yellow-400';
@@ -269,16 +264,19 @@ export default function PigskinView({ leagueData }: PigskinViewProps) {
                                 </div>
                                 <div className="p-2">
                                     {players.length > 0 ? <div className="grid grid-cols-3 gap-1.5">{players.map((p: any, idx: number) => {
+                                            const isOut = injuredPlayers.includes(p.id);
                                             let cardClasses = 'bg-slate-900 border-slate-800';
                                             if (p.tier === 1) cardClasses = 'bg-gradient-to-br from-red-950/40 to-slate-950 border-red-500/50 shadow-[inset_0_0_10px_rgba(220,38,38,0.2)]';
                                             if (p.tier === 2) cardClasses = 'bg-gradient-to-br from-yellow-950/40 to-slate-950 border-yellow-500/50 shadow-[inset_0_0_10px_rgba(234,179,8,0.2)]';
                                             if (p.tier === 3) cardClasses = 'bg-gradient-to-br from-green-950/40 to-slate-950 border-green-500/50 shadow-[inset_0_0_10px_rgba(34,197,94,0.2)]';
+                                            
                                             return (
-                                                    <div key={idx} className={`rounded-lg border relative overflow-hidden group shadow-md ${cardClasses} p-1.5 h-14 flex flex-col justify-center`}>
+                                                    <div key={idx} className={`rounded-lg border relative overflow-hidden group shadow-md ${cardClasses} p-1.5 h-14 flex flex-col justify-center transition-all`}>
+                                                        {isOut && <div className="absolute top-0 right-0 bg-red-600 text-[6px] font-black px-1 rounded-bl-sm z-20 animate-pulse flex items-center gap-0.5"><Stethoscope size={6} /> OUT</div>}
                                                         <div className="absolute inset-0 flex items-center justify-center pointer-events-none overflow-hidden"><span className={`text-4xl font-black opacity-10 select-none -rotate-12 ${getTierColor(p.tier)}`}>{p.num}</span></div>
                                                         <div className="relative z-10 flex flex-col items-center justify-center gap-0.5">
                                                             <div className="flex w-full justify-between items-center text-[7px] font-black uppercase text-slate-500 px-1"><span>{p.pos}</span><span>{p.team}</span></div>
-                                                            <div className={`text-[9px] font-black leading-tight w-full truncate text-center ${getTierColor(p.tier)}`}>{p.name.split(' ').slice(1).join(' ')}</div>
+                                                            <div className={`text-[9px] font-black leading-tight w-full truncate text-center ${isOut ? 'text-red-500' : getTierColor(p.tier)}`}>{p.name.split(' ').slice(1).join(' ')}</div>
                                                         </div>
                                                     </div>
                                             )
@@ -306,14 +304,23 @@ export default function PigskinView({ leagueData }: PigskinViewProps) {
             <div key={tier.id} className={`rounded-2xl border ${tier.border} ${tier.bg} overflow-hidden`}>
                 <div className="px-4 py-3 border-b border-inherit bg-black/20 flex justify-between items-center"><span className={`text-xs font-black uppercase tracking-widest ${tier.color}`}>{tier.label}</span></div>
                 <div className="p-1 grid grid-cols-1 gap-1">
-                    {Object.keys(PLAYER_DB).filter((pid) => PLAYER_DB[pid].tier === tier.id).map((pid) => (
-                        <div key={pid} className={`w-full px-3 py-2 rounded-lg flex items-center justify-between text-left bg-transparent`}>
-                            <div className="flex items-center gap-3">
-                                <div className="w-8 h-8 rounded-full bg-slate-800 border border-slate-600 flex flex-col items-center justify-center"><span className="text-[9px] font-black leading-none text-slate-300">{PLAYER_DB[pid].name.substring(0,2)}</span></div>
-                                <div><div className={`text-xs font-bold ${getTierColor(PLAYER_DB[pid].tier)}`}>{PLAYER_DB[pid].name}</div><div className="text-[9px] font-black uppercase tracking-wider text-slate-500">#{PLAYER_DB[pid].num} • {PLAYER_DB[pid].team} • {PLAYER_DB[pid].pos}</div></div>
+                    {Object.keys(PLAYER_DB).filter((pid) => PLAYER_DB[pid].tier === tier.id).map((pid) => {
+                        const isOut = injuredPlayers.includes(pid);
+                        return (
+                            <div key={pid} className="w-full px-3 py-2 rounded-lg flex items-center justify-between text-left bg-transparent">
+                                <div className="flex items-center gap-3">
+                                    <div className={`w-8 h-8 rounded-full border flex flex-col items-center justify-center ${isOut ? 'border-red-500 bg-red-950/20' : 'border-slate-600 bg-slate-800'}`}>
+                                        <span className={`text-[9px] font-black leading-none ${isOut ? 'text-red-500' : 'text-slate-300'}`}>{isOut ? 'OUT' : PLAYER_DB[pid].num}</span>
+                                    </div>
+                                    <div>
+                                        <div className={`text-xs font-bold ${isOut ? 'text-red-500' : getTierColor(PLAYER_DB[pid].tier)}`}>{PLAYER_DB[pid].name}</div>
+                                        <div className="text-[9px] font-black uppercase tracking-wider text-slate-500">#{PLAYER_DB[pid].num} • {PLAYER_DB[pid].team} • {PLAYER_DB[pid].pos}</div>
+                                    </div>
+                                </div>
+                                {isOut && <Ban size={14} className="text-red-600" />}
                             </div>
-                        </div>
-                    ))}
+                        );
+                    })}
                 </div>
             </div>
         ))}
@@ -333,13 +340,9 @@ export default function PigskinView({ leagueData }: PigskinViewProps) {
             <div className="space-y-3">
                 {displayPlays.length > 0 ? displayPlays.map((play, i) => {
                     const playId = `play_${String((globalPlays.length - 1) - i).padStart(3, '0')}`;
-                    
                     const playText = play.play?.toLowerCase() || "";
                     const isNullPlay = playText.includes("kick") || playText.includes("punt") || playText.includes("field goal") || playText.includes("touchback") || playText.includes("timeout") || playText.includes("end");
                     
-                    // --- NULL PLAYS STILL SHOW (GRAY) ---
-                    // if (isNullPlay) return null; // Removed
-
                     const leagueResult = leagueLogs[playId]; 
                     const stats = play.playerStats || {};
                     const playerId = Object.keys(stats)[0];
@@ -352,12 +355,12 @@ export default function PigskinView({ leagueData }: PigskinViewProps) {
                     
                     if (leagueResult) {
                         if (leagueResult.type === 'burn') {
-                            statusLabel = `${leagueResult.message}`; // "JOHN SMITH BURNED"
+                            statusLabel = `${leagueResult.message}`;
                             statusColor = "text-red-500";
                             cardBorder = "border-red-500/50";
                             cardBg = "bg-red-950/10";
                         } else if (leagueResult.type === 'score') {
-                            statusLabel = `${leagueResult.message}`; // "JOHN SMITH +7"
+                            statusLabel = `${leagueResult.message}`;
                             statusColor = "text-green-400";
                             cardBorder = "border-green-500/50";
                             cardBg = "bg-green-950/10";
@@ -365,11 +368,9 @@ export default function PigskinView({ leagueData }: PigskinViewProps) {
                             statusLabel = "GAME UPDATE";
                             statusColor = "text-slate-600";
                             cardBorder = "border-slate-800";
+                            cardBg = "bg-slate-900";
                         }
                     } else if (ownerName) {
-                        // NOW isGameFlow IS DEFINED
-                        // But wait, isGameFlow is not defined in this scope.
-                        // Re-use isNullPlay logic
                         if (!isNullPlay) {
                             statusLabel = `${ownerName} +1`;
                             statusColor = "text-orange-400"; 

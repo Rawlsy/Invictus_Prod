@@ -7,21 +7,24 @@ const GAME_ID = "20260208_NE@SEA";
 export const maxDuration = 60; 
 export const dynamic = 'force-dynamic';
 
-// --- CONFIGURATION ---
+// --- CONFIGURATION: SHAHEED & KICKERS ADDED ---
 const TIERS = {
     // TIER 1: Stars
     1: ['4431452', '4569173', '4567048', '4431566'],
     // TIER 2: Starters
     2: ['2976212', '3046439', '5000001', '2977187', '4426514'],
-    // TIER 3: Role Players (KICKERS REMOVED)
-    3: ['4241478', '4431526', '3052876', '4431611', '3912547'] 
+    // TIER 3: Role Players & Special Teams
+    3: [
+        '4241478', '4431526', '3052876', '4431611', '3912547',
+        '4684940', // Rashid Shaheed (SEA - WR)
+    ] 
 };
 
 export async function GET() {
   try {
     console.log("⏰ Starting Sync Loop (4x / 14s delay)...");
 
-    // --- LOOP: 4 Times x 14 Seconds ---
+    // --- LOOP: 4 Times x 14 Seconds = 56s Total ---
     for (let i = 0; i < 4; i++) {
         await performSync();
         
@@ -76,7 +79,7 @@ async function performSync() {
         const membersRef = leaguesRef.doc(leagueId).collection('Members');
         const membersSnap = await membersRef.get();
         
-        // --- FIX: Added ': any[]' type to fix TypeScript build error ---
+        // Use : any[] to bypass strict TS check during Vercel build
         let members: any[] = membersSnap.docs.map(d => ({ id: d.id, ref: d.ref, ...d.data() }))
             .sort((a: any, b: any) => (parseInt(a.queueOrder) || 999) - (parseInt(b.queueOrder) || 999));
 
@@ -97,7 +100,8 @@ async function performSync() {
             const currentLineup = (Array.isArray(holder.lineup) && holder.lineup.length > 0) ? holder.lineup[holder.lineup.length - 1] : (holder.lineup || {});
             const myPlayerIds: string[] = currentLineup.players || [];
 
-            const isNullPlay = lowerDesc.includes('kick') || lowerDesc.includes('punt') || lowerDesc.includes('field goal') || lowerDesc.includes('extra point') || lowerDesc.includes('touchback') || lowerDesc.includes('timeout') || lowerDesc.includes('end quarter') || lowerDesc.includes('end game');
+            // Define isNullPlay for game flow (kickoffs, punts, etc.)
+            const isNullPlay = lowerDesc.includes('kickoff') || lowerDesc.includes('punt') || lowerDesc.includes('timeout') || lowerDesc.includes('end quarter') || lowerDesc.includes('end game');
 
             let holderInvolved = false;
             if (!isNullPlay) {
@@ -156,17 +160,23 @@ async function performSync() {
             if (shouldRotate) {
                 batch.update(holder.ref, { lineup: [] });
                 batchCount++;
+
+                // Queue Rotation
                 const movingMember = members.shift();
                 if (movingMember) members.push(movingMember);
+
                 members.forEach((m: any, index: number) => {
                     batch.update(m.ref, { queueOrder: index + 1 });
                     batchCount++;
                 });
+
+                // Deal New Hand (Injury Aware)
                 const newOnDeck = members[1];
                 if (newOnDeck) {
                     const p1 = TIERS[1].filter(id => !injuries.includes(id)).sort(() => 0.5 - Math.random())[0];
                     const p2 = TIERS[2].filter(id => !injuries.includes(id)).sort(() => 0.5 - Math.random())[0];
                     const p3 = TIERS[3].filter(id => !injuries.includes(id)).sort(() => 0.5 - Math.random())[0];
+
                     if (p1 && p2 && p3) {
                         const newHand = [{ turn: Date.now().toString(), players: [p1, p2, p3] }];
                         batch.update(newOnDeck.ref, { lineup: newHand });

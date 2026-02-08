@@ -3,7 +3,7 @@ import { db } from '@/lib/firebaseAdmin';
 import { FieldValue } from 'firebase-admin/firestore';
 
 // --- CONFIGURATION ---
-const TANK01_ENDPOINT = "https://tank01-nfl-live-in-game-real-time-statistics-nfl.p.rapidapi.com/getNFLBoxScore";
+//const TANK01_ENDPOINT = "https://tank01-nfl-live-in-game-real-time-statistics-nfl.p.rapidapi.com/getNFLBoxScore";
 const GAME_ID = "20260208_NE@SEA"; 
 const API_KEY = "85657f0983msh1fda8640dd67e05p1bb7bejsn3e59722b8c1e"; 
 const CRON_SECRET = "pigskin_super_bowl_2026"; 
