@@ -194,11 +194,8 @@ const renderInfoContent = () => {
                     text: `Enter my league "${leagueData?.name}" using code: ${leagueData?.joinCode}`,
                     url: leagueUrl,
                 });
-            } catch (err) {
-                console.log('Share failed:', err);
-            }
+            } catch (err) { console.error('Share failed:', err); }
         } else {
-            // Fallback for desktop: Copy link to clipboard
             navigator.clipboard.writeText(leagueUrl);
             setCopied(true);
             setTimeout(() => setCopied(false), 2000);
@@ -206,24 +203,21 @@ const renderInfoContent = () => {
     };
 
     return (
-        <div className="space-y-4 animate-in fade-in duration-300 max-w-2xl mx-auto pt-4 pb-20">
-            {/* 1. Share League Action Card */}
+        <div className="space-y-4 animate-in fade-in duration-300 max-w-2xl mx-auto pt-4 pb-20 px-2">
+            {/* Share Card */}
             <div className="bg-gradient-to-br from-orange-600 to-red-600 rounded-2xl p-5 shadow-xl shadow-orange-500/10">
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between gap-4">
                     <div className="space-y-1">
-                        <h3 className="text-sm font-black uppercase tracking-widest text-white">Recruit Members</h3>
+                        <h3 className="text-sm font-black uppercase tracking-widest text-white leading-tight">Recruit Members</h3>
                         <p className="text-[10px] text-orange-100 font-bold opacity-80 italic">Invite others to join the chaos</p>
                     </div>
-                    <button 
-                        onClick={handleShare}
-                        className="bg-white text-orange-600 px-5 py-2.5 rounded-xl font-black text-[10px] uppercase tracking-widest shadow-lg active:scale-90 transition-transform flex items-center gap-2"
-                    >
-                        <Play size={12} fill="currentColor" /> Share League
+                    <button onClick={handleShare} className="bg-white text-orange-600 px-4 py-2 rounded-xl font-black text-[10px] uppercase tracking-widest shadow-lg active:scale-95 transition-all flex items-center gap-2 whitespace-nowrap">
+                        <Play size={12} fill="currentColor" /> Share
                     </button>
                 </div>
             </div>
 
-            {/* 2. Security & Credentials Card */}
+            {/* Access Keys & Password */}
             <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl">
                 <div className="bg-slate-800/50 p-4 border-b border-slate-700 flex items-center justify-between">
                     <h2 className="text-sm font-black uppercase tracking-widest text-white flex items-center gap-2">
@@ -231,49 +225,32 @@ const renderInfoContent = () => {
                     </h2>
                 </div>
                 <div className="p-6 space-y-5">
-                    {/* Join Code Section */}
                     <div className="space-y-2">
-                        <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 flex items-center gap-2">
-                            <Layers size={12} /> League Join Code
-                        </label>
+                        <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 flex items-center gap-2"><Layers size={12} /> League Join Code</label>
                         <div className="flex items-center gap-2">
-                            <div className="flex-1 bg-black/40 border border-slate-700 rounded-lg p-3 text-sm font-mono font-bold text-orange-400 tracking-wider">
-                                {leagueData?.joinCode || 'LOADING...'}
-                            </div>
-                            <button onClick={copyLeagueCode} className="p-3 bg-slate-800 border border-slate-700 rounded-lg hover:bg-slate-700 transition-colors text-slate-400">
-                                {copied ? <Check size={18} className="text-green-500" /> : <Layers size={18} />}
-                            </button>
+                            <div className="flex-1 bg-black/40 border border-slate-700 rounded-lg p-3 text-sm font-mono font-bold text-orange-400 tracking-wider">{leagueData?.joinCode || 'LOADING...'}</div>
+                            <button onClick={copyLeagueCode} className="p-3 bg-slate-800 border border-slate-700 rounded-lg active:bg-slate-700 transition-colors text-slate-400">{copied ? <Check size={18} className="text-green-500" /> : <Layers size={18} />}</button>
                         </div>
                     </div>
-
-                    {/* Password Section */}
                     <div className="space-y-2">
-                        <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 flex items-center gap-2">
-                            <Users size={12} /> Entry Password
-                        </label>
-                        <div className="relative group">
+                        <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 flex items-center gap-2"><Users size={12} /> Entry Password</label>
+                        <div className="relative">
                             <div className="w-full bg-black/40 border border-slate-700 rounded-lg p-3 text-sm font-mono font-bold text-slate-300 tracking-wider flex items-center justify-between">
                                 <span>{showPassword ? (leagueData?.password || 'No Password') : '••••••••'}</span>
-                                <button 
-                                    onClick={() => setShowPassword(!showPassword)}
-                                    className="text-slate-500 hover:text-white transition-colors p-1"
-                                >
+                                <button onClick={() => setShowPassword(!showPassword)} className="text-slate-500 hover:text-white transition-colors p-1">
                                     {showPassword ? <Ban size={16} /> : <Play size={16} fill="currentColor" className="rotate-90" />}
                                 </button>
                             </div>
                         </div>
-                        <p className="text-[9px] text-slate-600 font-bold uppercase italic">Only shared with current league members</p>
                     </div>
                 </div>
             </div>
 
-            {/* 3. New to the game? Rules Link */}
-            <Link href="/how-to-play" className="block bg-slate-900/40 border border-slate-800/50 rounded-2xl p-4 hover:bg-slate-800/40 transition-colors">
+            {/* Rulebook Link */}
+            <Link href="/how-to-play" className="block bg-slate-900/40 border border-slate-800/50 rounded-2xl p-4 active:bg-slate-800/60 transition-colors">
                 <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-xl bg-orange-500/10 flex items-center justify-center text-orange-500">
-                            <Gamepad2 size={20} />
-                        </div>
+                        <div className="w-10 h-10 rounded-xl bg-orange-500/10 flex items-center justify-center text-orange-500"><Gamepad2 size={20} /></div>
                         <div>
                             <h4 className="text-[10px] font-black uppercase tracking-widest text-white">Rulebook</h4>
                             <p className="text-[9px] text-slate-500 font-bold">New to the game? See how it works.</p>
