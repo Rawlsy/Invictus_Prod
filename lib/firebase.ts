@@ -1,9 +1,9 @@
-// src/lib/firebase.js
+// lib/firebase.ts
 import { initializeApp, getApps, getApp } from "firebase/app";
 import { getAuth, GoogleAuthProvider } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
-console.log("MY API KEY IS:", process.env.NEXT_PUBLIC_FIREBASE_API_KEY);
 
+// Your configuration
 const firebaseConfig = {
   apiKey: "AIzaSyCvFmy4En7XCAsZMUHwG53gy47M3POZ9uA",
   authDomain: "invictus-d01da.firebaseapp.com",
@@ -13,7 +13,7 @@ const firebaseConfig = {
   appId: "1:508015403416:web:d01bc290d14e91d4864bed"
 };
 
-// Check if firebase is already running to avoid "Double-Initialization" errors
+// Initialize Firebase (Singleton pattern to prevent re-initialization errors)
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 
 const auth = getAuth(app);

@@ -1,35 +1,36 @@
 ﻿'use client';
 
-import { useState, useEffect } from 'react';
-import { collection, onSnapshot, query, orderBy, limit, serverTimestamp, doc, writeBatch } from 'firebase/firestore'; 
+import { useState, useEffect, useMemo } from 'react';
+import { collection, onSnapshot, query, orderBy, limit, doc } from 'firebase/firestore'; 
 import { db } from '@/lib/firebase'; 
-import { ChevronLeft, Trophy, Layers, Sparkles, ScrollText, Users, Flame, Play, Ban, Stethoscope, Info, Copy, Check, Globe, Lock, AlertTriangle, Gamepad2 } from 'lucide-react';
+import { ChevronLeft, Trophy, Layers, ScrollText, Users, Flame, Play, Info, Check, Globe, Lock, AlertTriangle, Gamepad2, Clock, Ban, Stethoscope } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+
+const GAME_ID = "20260208_NE@SEA";
 
 interface PigskinViewProps {
     leagueData: any;
 }
 
-// --- 1. SUPER BOWL LX PLAYER DATABASE ---
+// --- CONFIG: DARNOLD IN TIER 3 ---
 const PLAYER_DB: Record<string, any> = {
-    // PATRIOTS
-    'ne-maye':      { name: 'Drake Maye', team: 'NE', pos: 'QB', num: 10, tier: 1 },
-    'ne-stevenson': { name: 'Rhamondre Stevenson', team: 'NE', pos: 'RB', num: 38, tier: 1 },
-    'ne-diggs':     { name: 'Stefon Diggs', team: 'NE', pos: 'WR', num: 14, tier: 2 },
-    'ne-henry':     { name: 'Hunter Henry', team: 'NE', pos: 'TE', num: 85, tier: 2 },
-    'ne-henderson': { name: 'TreVeyon Henderson', team: 'NE', pos: 'RB', num: 31, tier: 2 },
-    'ne-gibson':    { name: 'Antonio Gibson', team: 'NE', pos: 'RB', num: 4, tier: 3 },
-    'ne-boutte':    { name: 'Kayshon Boutte', team: 'NE', pos: 'WR', num: 80, tier: 3 },
-    'ne-hollins':   { name: 'Mack Hollins', team: 'NE', pos: 'WR', num: 13, tier: 3 },
-
-    // SEAHAWKS
-    'sea-walker':   { name: 'Kenneth Walker III', team: 'SEA', pos: 'RB', num: 9, tier: 1 },
-    'sea-jsn':      { name: 'Jaxon Smith-Njigba', team: 'SEA', pos: 'WR', num: 11, tier: 1 },
-    'sea-kupp':     { name: 'Cooper Kupp', team: 'SEA', pos: 'WR', num: 10, tier: 2 },
-    'sea-holani':   { name: 'George Holani', team: 'SEA', pos: 'RB', num: 28, tier: 2 },
-    'sea-darnold':  { name: 'Sam Darnold', team: 'SEA', pos: 'QB', num: 14, tier: 3 },
-    'sea-barner':   { name: 'AJ Barner', team: 'SEA', pos: 'TE', num: 88, tier: 3 },
+    '4431452': { name: 'Drake Maye', team: 'NE', pos: 'QB', num: 10, tier: 1 },
+    '4569173': { name: 'Rhamondre Stevenson', team: 'NE', pos: 'RB', num: 38, tier: 1 },
+    '2976212': { name: 'Stefon Diggs', team: 'NE', pos: 'WR', num: 14, tier: 2 },
+    '3046439': { name: 'Hunter Henry', team: 'NE', pos: 'TE', num: 85, tier: 2 },
+    '5000001': { name: 'TreVeyon Henderson', team: 'NE', pos: 'RB', num: 32, tier: 2 },
+    '4241478': { name: 'Antonio Gibson', team: 'NE', pos: 'RB', num: 4, tier: 3 },
+    '4431526': { name: 'Kayshon Boutte', team: 'NE', pos: 'WR', num: 80, tier: 3 },
+    '3052876': { name: 'Mack Hollins', team: 'NE', pos: 'WR', num: 13, tier: 3 },
+    '3931390': { name: 'Joey Slye', team: 'NE', pos: 'K', num: 9, tier: 3 },
+    '4567048': { name: 'Kenneth Walker III', team: 'SEA', pos: 'RB', num: 9, tier: 1 },
+    '4431566': { name: 'Jaxon Smith-Njigba', team: 'SEA', pos: 'WR', num: 11, tier: 1 },
+    '3912547': { name: 'Sam Darnold', team: 'SEA', pos: 'QB', num: 14, tier: 3 }, 
+    '2977187': { name: 'Cooper Kupp', team: 'SEA', pos: 'WR', num: 10, tier: 2 },
+    '4426514': { name: 'George Holani', team: 'SEA', pos: 'RB', num: 28, tier: 2 },
+    '4431611': { name: 'AJ Barner', team: 'SEA', pos: 'TE', num: 88, tier: 3 },
+    '2473037': { name: 'Jason Myers', team: 'SEA', pos: 'K', num: 5, tier: 3 }
 };
 
 const TIERS_MENU = [
@@ -41,65 +42,74 @@ const TIERS_MENU = [
 export default function PigskinView({ leagueData }: PigskinViewProps) {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<'game' | 'log' | 'tiers' | 'info'>('game');
+   
   const [members, setMembers] = useState<any[]>([]);
-  const [logs, setLogs] = useState<any[]>([]);
+  const [globalPlays, setGlobalPlays] = useState<any[]>([]); 
+  const [leagueLogs, setLeagueLogs] = useState<Record<string, any>>({}); 
+   
   const [injuredPlayers, setInjuredPlayers] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [copied, setCopied] = useState(false);
   const [commissionerName, setCommissionerName] = useState<string>('Loading...');
+  const [gameFeed, setGameFeed] = useState<any>(null);
 
-  // --- DATA FETCHING ---
-  
-  // 1. Members & Commissioner Check
+  // --- FETCH MEMBERS ---
   useEffect(() => {
     if (!leagueData?.id) return;
     const membersRef = collection(db, 'leagues', leagueData.id, 'Members');
     const unsubscribe = onSnapshot(membersRef, (snapshot) => {
         const fetchedMembers: any[] = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-        
-        // --- FIXED OWNER LOOKUP ---
         if (leagueData.ownerId) {
-            // Find member where the document ID matches the ownerId
             const owner = fetchedMembers.find((m) => m.id === leagueData.ownerId);
-            if (owner) {
-                // Try different possible name fields
-                setCommissionerName(owner.username || owner.displayName || owner.name || 'Commissioner');
-            } else {
-                setCommissionerName('Unknown');
-            }
-        } else {
-            setCommissionerName('Commissioner');
+            setCommissionerName(owner?.username || owner?.displayName || 'Commissioner');
         }
-
-        const sorted = fetchedMembers.sort((a: any, b: any) => {
-            const orderA = a.queueOrder ?? 999;
-            const orderB = b.queueOrder ?? 999;
-            if (orderA !== orderB) return orderA - orderB;
-            return (b.scores?.Total || 0) - (a.scores?.Total || 0);
-        });
-        setMembers(sorted.map((m, i) => ({ ...m, rank: i + 1 })));
+        const sortedMembers = fetchedMembers.sort((a, b) => (parseInt(a.queueOrder) || 999) - (parseInt(b.queueOrder) || 999));
+        setMembers(sortedMembers.map((m, i) => ({ ...m, rank: i + 1 })));
         setLoading(false);
-    }, (error) => {
-        console.error("Error fetching members:", error);
-    });
-    return () => unsubscribe();
-  }, [leagueData?.id, leagueData?.ownerId]);
-
-  // 2. Logs
-  useEffect(() => {
-    if (!leagueData?.id) return;
-    const logsRef = collection(db, 'leagues', leagueData.id, 'ActivityLogs');
-    const q = query(logsRef, orderBy('timestamp', 'desc'), limit(50));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-        const fetchedLogs = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-        setLogs(fetchedLogs);
-    }, (error) => {
-        console.error("Error fetching logs:", error);
     });
     return () => unsubscribe();
   }, [leagueData?.id]);
 
-  // 3. GLOBAL PIGSKIN INJURIES
+  // --- GLOBAL FEED ---
+  useEffect(() => {
+    const interval = setInterval(() => {
+        fetch('/api/pigskin/sync').catch(err => console.error("Sync trigger failed", err));
+    }, 5000); 
+
+    const feedRef = doc(db, 'system', 'live_feed');
+    const unsubscribe = onSnapshot(feedRef, (docSnap) => {
+        if (docSnap.exists()) {
+            const data = docSnap.data();
+            setGameFeed(data);
+            if (data.allPlayByPlay && Array.isArray(data.allPlayByPlay)) {
+                setGlobalPlays(data.allPlayByPlay); 
+            }
+        }
+    });
+
+    return () => {
+        clearInterval(interval);
+        unsubscribe();
+    };
+  }, []);
+
+  // --- LEAGUE LOGS ---
+  useEffect(() => {
+    if (!leagueData?.id) return;
+    const logsRef = collection(db, 'leagues', leagueData.id, 'ActivityLogs');
+    const q = query(logsRef, orderBy('timestamp', 'desc'), limit(50));
+    
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+        const logsMap: Record<string, any> = {};
+        snapshot.docs.forEach(doc => {
+            logsMap[doc.id] = doc.data(); 
+        });
+        setLeagueLogs(logsMap);
+    });
+    return () => unsubscribe();
+  }, [leagueData?.id]);
+
+  // --- INJURIES ---
   useEffect(() => {
     const injuryRef = doc(db, 'system', 'pigskin_injuries');
     const unsubscribe = onSnapshot(injuryRef, (docSnap) => {
@@ -108,11 +118,39 @@ export default function PigskinView({ leagueData }: PigskinViewProps) {
         } else {
             setInjuredPlayers([]);
         }
-    }, (error) => {
-        console.error("Error fetching global injuries:", error);
     });
     return () => unsubscribe();
   }, []);
+
+  // --- SCORE CALCULATOR ---
+  // Calculates real-time score from the play-by-play array
+  const { homeScore, awayScore } = useMemo(() => {
+    let home = 0;
+    let away = 0;
+
+    globalPlays.forEach(play => {
+        const text = (play.play || "").toLowerCase();
+        const stats = play.playerStats || {};
+        const pid = Object.keys(stats)[0]; // Primary player involved
+        const player = PLAYER_DB[pid];
+
+        if (!player) return; // Can't score if we don't know the team
+
+        let points = 0;
+        if (text.includes("touchdown")) points = 6; // TD is 6
+        else if (text.includes("field goal") && text.includes("good")) points = 3;
+        else if (text.includes("extra point") && text.includes("good")) points = 1;
+        else if (text.includes("safety")) points = 2;
+
+        if (points > 0) {
+            if (player.team === 'NE') home += points;
+            else if (player.team === 'SEA') away += points;
+        }
+    });
+
+    return { homeScore: home, awayScore: away };
+  }, [globalPlays]);
+
 
   const copyLeagueCode = () => {
     if (leagueData?.joinCode) {
@@ -131,64 +169,37 @@ export default function PigskinView({ leagueData }: PigskinViewProps) {
       }
   };
 
+  const findOwnerName = (playerId: string) => {
+      if (!playerId) return null;
+      const owner = members.find(m => {
+        let rawPlayerIds: string[] = [];
+        if (m.lineup) {
+            if (Array.isArray(m.lineup)) {
+                const lastEntry = m.lineup[m.lineup.length - 1];
+                rawPlayerIds = lastEntry?.players || [];
+            } else {
+                const keys = Object.keys(m.lineup).map(Number).sort((a,b) => b-a);
+                const lastKey = keys[0];
+                if (lastKey !== undefined) {
+                    rawPlayerIds = m.lineup[String(lastKey)]?.players || [];
+                }
+            }
+        }
+        return rawPlayerIds.includes(playerId);
+      });
+      return owner ? owner.username : null;
+  };
+
+  // ... (renderInfoContent same as before) ...
   const renderInfoContent = () => (
     <div className="space-y-6 animate-in fade-in duration-300 max-w-2xl mx-auto pt-4">
         <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl">
             <div className="bg-slate-800/50 p-4 border-b border-slate-700 flex items-center justify-between">
-                <h2 className="text-sm font-black uppercase tracking-widest text-white flex items-center gap-2">
-                    <Info size={16} className="text-orange-500" /> League Details
-                </h2>
-                {leagueData?.privacy === 'Public' ? (
-                    <span className="flex items-center gap-1 text-[10px] font-bold text-green-500 uppercase"><Globe size={12} /> Public</span>
-                ) : (
-                    <span className="flex items-center gap-1 text-[10px] font-bold text-slate-500 uppercase"><Lock size={12} /> Private</span>
-                )}
+                <h2 className="text-sm font-black uppercase tracking-widest text-white flex items-center gap-2"><Info size={16} className="text-orange-500" /> League Details</h2>
+                {leagueData?.privacy === 'Public' ? <span className="text-[10px] font-bold text-green-500 uppercase flex items-center gap-1"><Globe size={12} /> Public</span> : <span className="text-[10px] font-bold text-slate-500 uppercase flex items-center gap-1"><Lock size={12} /> Private</span>}
             </div>
             <div className="p-6 space-y-6">
-                <div className="space-y-2">
-                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-500">League Join Code</label>
-                    <div className="flex items-center gap-2">
-                        <div className="flex-1 bg-black/40 border border-slate-700 rounded-lg p-3 text-sm font-mono font-bold text-orange-400 tracking-wider">
-                            {leagueData?.joinCode || 'LOADING...'}
-                        </div>
-                        <button 
-                            onClick={copyLeagueCode}
-                            className="p-3 bg-slate-800 border border-slate-700 rounded-lg hover:bg-slate-700 transition-colors text-slate-400 hover:text-white"
-                        >
-                            {copied ? <Check size={18} className="text-green-500" /> : <Copy size={18} />}
-                        </button>
-                    </div>
-                    <p className="text-[10px] text-slate-500">Share this code to invite friends.</p>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                        <label className="text-[10px] font-black uppercase tracking-widest text-slate-500">Password</label>
-                        <div className="bg-black/40 border border-slate-700 rounded-lg p-3 text-sm font-bold text-white">
-                            {leagueData?.password || 'No Password'}
-                        </div>
-                    </div>
-                    <div className="space-y-2">
-                        <label className="text-[10px] font-black uppercase tracking-widest text-slate-500">Max Players</label>
-                        <div className="bg-black/40 border border-slate-700 rounded-lg p-3 text-sm font-bold text-white flex items-center gap-2">
-                            <Users size={14} className="text-slate-500" />
-                            {leagueData?.maxPlayers || 'Unlimited'}
-                        </div>
-                    </div>
-                </div>
-
-                <div className="space-y-2 pt-2 border-t border-slate-800">
-                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-500">Commissioner</label>
-                    <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded-full bg-orange-600 flex items-center justify-center font-bold text-xs text-white">
-                            {commissionerName.charAt(0).toUpperCase()}
-                        </div>
-                        <div>
-                            <div className="text-sm font-bold text-white">{commissionerName}</div>
-                            <div className="text-[10px] text-slate-500 uppercase font-black">League Owner</div>
-                        </div>
-                    </div>
-                </div>
+                <div className="space-y-2"><label className="text-[10px] font-black uppercase tracking-widest text-slate-500">League Join Code</label><div className="flex items-center gap-2"><div className="flex-1 bg-black/40 border border-slate-700 rounded-lg p-3 text-sm font-mono font-bold text-orange-400 tracking-wider">{leagueData?.joinCode || 'LOADING...'}</div><button onClick={copyLeagueCode} className="p-3 bg-slate-800 border border-slate-700 rounded-lg hover:bg-slate-700 transition-colors text-slate-400 hover:text-white">{copied ? <Check size={18} className="text-green-500" /> : <Layers size={18} />}</button></div></div>
             </div>
         </div>
     </div>
@@ -197,218 +208,217 @@ export default function PigskinView({ leagueData }: PigskinViewProps) {
   const renderGameContent = () => (
     <div className="space-y-4 animate-in fade-in duration-300">
         <div className="bg-gradient-to-r from-orange-600 to-red-600 rounded-2xl p-0.5 shadow-lg">
-            <div className="bg-[#0f0a05] rounded-[0.9rem] p-4 flex items-center gap-4 relative overflow-hidden">
+            <div className="bg-[#0f0a05] rounded-[0.9rem] p-4 flex flex-col md:flex-row items-center justify-between gap-4 relative overflow-hidden">
                 <div className="absolute inset-0 bg-gradient-to-br from-orange-900/20 to-transparent"></div>
-                <div className="relative z-10 flex-1">
-                    <h2 className="text-lg font-black uppercase italic tracking-tighter text-white">Super Bowl LX</h2>
-                    <p className="text-orange-200/60 text-[10px] font-bold leading-tight">NE vs SEA</p>
+                <div className="relative z-10 flex items-center gap-3">
+                    <Trophy className="text-orange-500" size={24} />
+                    <div><h2 className="text-lg font-black uppercase italic tracking-tighter text-white">Super Bowl LX</h2><p className="text-orange-200/60 text-[10px] font-bold leading-tight">NE vs SEA</p></div>
                 </div>
-                <div className="relative z-10"><Trophy className="text-orange-500" size={24} /></div>
+                {gameFeed ? (
+                    <div className="relative z-10 flex items-center gap-4 bg-black/40 p-2 rounded-lg border border-white/10">
+                        {/* AWAY SCORE (SEA) */}
+                        <div className="text-center">
+                            <div className="text-2xl font-black text-white leading-none">{awayScore}</div>
+                            <div className="text-[9px] font-bold text-slate-400 uppercase">SEA</div>
+                        </div>
+                        <div className="text-xs font-black text-orange-500">VS</div>
+                        {/* HOME SCORE (NE) */}
+                        <div className="text-center">
+                            <div className="text-2xl font-black text-white leading-none">{homeScore}</div>
+                            <div className="text-[9px] font-bold text-slate-400 uppercase">NE</div>
+                        </div>
+                        <div className="h-8 w-px bg-white/10 mx-1"></div>
+                        <div className="flex flex-col items-center min-w-[50px]"><div className="text-sm font-mono font-bold text-green-400 flex items-center gap-1">{gameFeed.clock || "00:00"}</div><div className="text-[9px] font-bold text-slate-400 uppercase">{gameFeed.period || "PRE"}</div></div>
+                    </div>
+                ) : (
+                    <div className="relative z-10 text-[10px] font-bold text-slate-500 uppercase tracking-widest bg-black/20 px-3 py-1 rounded-full">Waiting for kickoff...</div>
+                )}
             </div>
         </div>
 
-        <div className="flex items-center justify-center gap-2 p-2 bg-yellow-500/10 border border-yellow-500/20 rounded-lg">
-            <AlertTriangle size={12} className="text-yellow-500" />
-            <span className="text-[10px] font-bold text-yellow-500 uppercase tracking-wide">Player order will be randomized before kickoff</span>
-        </div>
-
-        {loading ? (
-            <div className="text-center py-10 text-orange-500 font-bold text-xs animate-pulse">Loading Arena...</div>
-        ) : (
-            <div className="space-y-3">
-                {members.map((member, index) => {
-                    const isPigskinHolder = index === 0;
-                    const isQueue = index > 1;
-
-                    if (!isQueue) {
-                        const currentLineup = member.lineup?.[member.lineup.length - 1];
-                        const rawPlayerIds = currentLineup?.players || [];
-                        const players = rawPlayerIds.map((pid: string) => PLAYER_DB[pid]).filter(Boolean).sort((a: any, b: any) => a.tier - b.tier);
-                        const badgeColor = isPigskinHolder ? 'bg-gradient-to-r from-red-600 via-orange-500 to-red-600 text-white shadow-lg' : 'bg-yellow-500/20 text-yellow-400';
-                        const badgeText = isPigskinHolder ? 'Pigskin Holder' : 'On Deck';
-
-                        return (
-                            <div key={member.id} className={`relative rounded-2xl p-px transition-all overflow-hidden ${isPigskinHolder ? 'mb-4 scale-[1.02]' : ''}`}>
-                                {isPigskinHolder && <div className="absolute -inset-1 rounded-2xl real-fire-bg blur-lg opacity-80 z-0"></div>}
-                                {!isPigskinHolder && <div className="absolute inset-0 bg-yellow-500/5 z-0 rounded-2xl border border-yellow-500/30"></div>}
-
-                                <div className={`relative z-10 rounded-[0.9rem] overflow-hidden bg-[#020617] border ${isPigskinHolder ? 'border-orange-500/50' : 'border-transparent'} h-full`}>
-                                    <div className={`absolute top-0 inset-x-0 ${badgeColor} text-[9px] font-black uppercase tracking-widest py-1 text-center flex items-center justify-center gap-2`}>
-                                        {isPigskinHolder && <Flame size={10} fill="currentColor" />} {badgeText} {isPigskinHolder && <Flame size={10} fill="currentColor" />}
-                                    </div>
-                                    <div className="p-3 mt-4 flex justify-between items-center border-b border-slate-800/50">
-                                        <div className="flex items-center gap-3">
-                                            <div className="w-6 h-6 rounded-md flex items-center justify-center font-black text-[10px] bg-slate-800 text-slate-400">#{member.rank}</div>
-                                            <div className="font-bold text-white text-xs">{member.username}</div>
-                                        </div>
-                                        <div className="text-lg font-black text-white">{member.scores?.Total?.toFixed(0) || 0}</div>
-                                    </div>
-                                    <div className="p-2">
-                                        {players.length > 0 ? (
-                                            <div className="grid grid-cols-3 gap-1.5">
-                                                {players.map((p: any, idx: number) => {
-                                                    let cardClasses = 'bg-slate-900 border-slate-800';
-                                                    if (p.tier === 1) cardClasses = 'bg-gradient-to-br from-red-950/40 to-slate-950 border-red-500/50 shadow-[inset_0_0_10px_rgba(220,38,38,0.2)]';
-                                                    if (p.tier === 2) cardClasses = 'bg-gradient-to-br from-yellow-950/40 to-slate-950 border-yellow-500/50 shadow-[inset_0_0_10px_rgba(234,179,8,0.2)]';
-                                                    if (p.tier === 3) cardClasses = 'bg-gradient-to-br from-green-950/40 to-slate-950 border-green-500/50 shadow-[inset_0_0_10px_rgba(34,197,94,0.2)]';
-                                                    const nameColor = getTierColor(p.tier);
-                                                    return (
-                                                        <div key={idx} className={`rounded-lg border relative overflow-hidden group shadow-md ${cardClasses} p-1.5 h-14 flex flex-col justify-center`}>
-                                                            <div className="absolute inset-0 flex items-center justify-center pointer-events-none overflow-hidden">
-                                                                <span className={`text-4xl font-black opacity-10 select-none -rotate-12 ${nameColor}`}>{p.num}</span>
-                                                            </div>
-                                                            <div className="relative z-10 flex flex-col items-center justify-center gap-0.5">
-                                                                <div className="flex w-full justify-between items-center text-[7px] font-black uppercase text-slate-500 px-1">
-                                                                    <span>{p.pos}</span><span>{p.team}</span>
-                                                                </div>
-                                                                <div className={`text-[9px] font-black leading-tight w-full truncate text-center ${nameColor}`}>{p.name.split(' ').slice(1).join(' ')}</div>
-                                                            </div>
-                                                        </div>
-                                                    )
-                                                })}
-                                            </div>
-                                        ) : <div className="p-4 text-center text-slate-600 text-[10px] font-bold">No Players Assigned</div>}
-                                    </div>
-                                </div>
-                            </div>
-                        );
+        <div className="space-y-3">
+            {members.map((member, index) => {
+                const isPigskinHolder = index === 0;
+                const isQueue = index > 1;
+                let rawPlayerIds: string[] = [];
+                if (member.lineup) {
+                    if (Array.isArray(member.lineup)) {
+                        const lastEntry = member.lineup[member.lineup.length - 1];
+                        rawPlayerIds = lastEntry?.players || [];
+                    } else {
+                        const keys = Object.keys(member.lineup).map(Number).sort((a,b) => b-a);
+                        const lastKey = keys[0];
+                        if (lastKey !== undefined) {
+                            rawPlayerIds = member.lineup[String(lastKey)]?.players || [];
+                        }
                     }
+                }
+                const players = rawPlayerIds.map(pid => PLAYER_DB[pid]).filter(Boolean).sort((a, b) => a.tier - b.tier);
 
+                if (!isQueue) {
+                    const badgeColor = isPigskinHolder ? 'bg-gradient-to-r from-red-600 via-orange-500 to-red-600 text-white shadow-lg' : 'bg-yellow-500/20 text-yellow-400';
+                    const badgeText = isPigskinHolder ? 'Pigskin Holder' : 'On Deck';
                     return (
-                        <div key={member.id} className="flex items-center gap-3 p-3 rounded-xl bg-slate-900/50 border border-slate-800">
-                            <div className="w-8 h-8 rounded-lg bg-slate-800 flex items-center justify-center font-black text-xs text-slate-500">#{member.rank}</div>
-                            <div className="flex-1">
-                                <div className="flex justify-between items-center mb-1.5">
-                                    <span className="text-xs font-bold text-slate-300">{member.username}</span>
-                                    <span className="text-xs font-black text-slate-500">{member.scores?.Total?.toFixed(0) || 0}</span>
+                        <div key={member.id} className={`relative rounded-2xl p-px transition-all overflow-hidden ${isPigskinHolder ? 'mb-4 scale-[1.02]' : ''}`}>
+                            {isPigskinHolder && <div className="absolute -inset-1 rounded-2xl real-fire-bg blur-lg opacity-80 z-0"></div>}
+                            <div className={`relative z-10 rounded-[0.9rem] overflow-hidden bg-[#020617] border ${isPigskinHolder ? 'border-orange-500/50' : 'border-slate-800'} h-full`}>
+                                <div className={`absolute top-0 inset-x-0 ${badgeColor} text-[9px] font-black uppercase tracking-widest py-1 text-center flex items-center justify-center gap-2`}>{isPigskinHolder && <Flame size={10} fill="currentColor" />} {badgeText} {isPigskinHolder && <Flame size={10} fill="currentColor" />}</div>
+                                <div className="p-3 mt-4 flex justify-between items-center border-b border-slate-800/50">
+                                    <div className="flex items-center gap-3"><div className="w-6 h-6 rounded-md flex items-center justify-center font-black text-[10px] bg-slate-800 text-slate-400">#{member.rank}</div><div className="font-bold text-white text-xs">{member.username}</div></div>
+                                    <div className="text-lg font-black text-white">{Math.round(member.scores?.Total || 0)}</div>
                                 </div>
-                                <div className="flex gap-1.5">{[1,2,3].map(i => <div key={i} className="h-1 flex-1 rounded-full bg-slate-800/80 overflow-hidden relative"><div className="absolute inset-0 bg-slate-700/30 w-1/2"></div></div>)}</div>
+                                <div className="p-2">
+                                    {players.length > 0 ? <div className="grid grid-cols-3 gap-1.5">{players.map((p: any, idx: number) => {
+                                            let cardClasses = 'bg-slate-900 border-slate-800';
+                                            if (p.tier === 1) cardClasses = 'bg-gradient-to-br from-red-950/40 to-slate-950 border-red-500/50 shadow-[inset_0_0_10px_rgba(220,38,38,0.2)]';
+                                            if (p.tier === 2) cardClasses = 'bg-gradient-to-br from-yellow-950/40 to-slate-950 border-yellow-500/50 shadow-[inset_0_0_10px_rgba(234,179,8,0.2)]';
+                                            if (p.tier === 3) cardClasses = 'bg-gradient-to-br from-green-950/40 to-slate-950 border-green-500/50 shadow-[inset_0_0_10px_rgba(34,197,94,0.2)]';
+                                            return (
+                                                    <div key={idx} className={`rounded-lg border relative overflow-hidden group shadow-md ${cardClasses} p-1.5 h-14 flex flex-col justify-center`}>
+                                                        <div className="absolute inset-0 flex items-center justify-center pointer-events-none overflow-hidden"><span className={`text-4xl font-black opacity-10 select-none -rotate-12 ${getTierColor(p.tier)}`}>{p.num}</span></div>
+                                                        <div className="relative z-10 flex flex-col items-center justify-center gap-0.5">
+                                                            <div className="flex w-full justify-between items-center text-[7px] font-black uppercase text-slate-500 px-1"><span>{p.pos}</span><span>{p.team}</span></div>
+                                                            <div className={`text-[9px] font-black leading-tight w-full truncate text-center ${getTierColor(p.tier)}`}>{p.name.split(' ').slice(1).join(' ')}</div>
+                                                        </div>
+                                                    </div>
+                                            )
+                                    })}</div> : <div className="p-4 text-center text-slate-600 text-[10px] font-bold">No Players Assigned</div>}
+                                </div>
                             </div>
                         </div>
                     );
-                })}
-            </div>
-        )}
-    </div>
-  );
-
-  const renderLogContent = () => (
-    <div className="space-y-4 animate-in slide-in-from-right-4 duration-300">
-        <div className="flex items-center justify-between px-2">
-            <h2 className="text-sm font-black uppercase tracking-widest text-slate-500">Game Activity</h2>
-            <span className="text-[10px] font-bold text-slate-600">Live Feed</span>
-        </div>
-        <div className="space-y-0 relative border-l border-slate-800 ml-3">
-            {logs.length > 0 ? logs.map((log, i) => (
-                <div key={log.id} className="ml-6 mb-6 relative">
-                    <div className={`absolute -left-[31px] top-1 w-4 h-4 rounded-full border-2 ${log.type === 'burn' ? 'bg-[#020617] border-red-500' : (log.type === 'score' ? 'bg-[#020617] border-green-500' : 'bg-slate-800 border-slate-600')}`}></div>
-                    <div className="flex flex-col">
-                        <span className="text-[9px] font-bold uppercase tracking-widest text-slate-500 mb-1">{log.timestamp?.toDate ? log.timestamp.toDate().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'}) : 'Just Now'}</span>
-                        <div className={`p-3 rounded-xl border ${log.type === 'burn' ? 'bg-red-950/10 border-red-500/20' : (log.type === 'score' ? 'bg-green-950/10 border-green-500/20' : 'bg-slate-900 border-slate-800')}`}>
-                            <p className="text-xs font-bold text-slate-200 leading-relaxed">{log.message}</p>
-                            {log.points !== 0 && (
-                                <span className={`inline-block mt-2 text-[10px] font-black px-1.5 py-0.5 rounded ${log.points > 0 ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
-                                    {log.points > 0 ? '+' : ''}{log.points} PTS
-                                </span>
-                            )}
-                        </div>
+                }
+                return (
+                    <div key={member.id} className="flex items-center gap-3 p-3 rounded-xl bg-slate-900/50 border border-slate-800">
+                        <div className="w-8 h-8 rounded-lg bg-slate-800 flex items-center justify-center font-black text-xs text-slate-500">#{member.rank}</div>
+                        <div className="flex-1"><div className="flex justify-between items-center mb-1.5"><span className="text-xs font-bold text-slate-300">{member.username}</span><span className="text-xs font-black text-slate-500">{Math.round(member.scores?.Total || 0)}</span></div></div>
                     </div>
-                </div>
-            )) : <div className="ml-6 p-6 text-center text-slate-500 text-xs">No activity yet.</div>}
+                );
+            })}
         </div>
     </div>
   );
 
   const renderTiersContent = () => (
     <div className="space-y-6 animate-in slide-in-from-right-4 duration-300 pb-10">
-        <div className="px-2">
-            <h2 className="text-sm font-black uppercase tracking-widest text-slate-500">Assignment Pool</h2>
-            <p className="text-[10px] font-bold text-slate-600 mt-1">Assignments are random.</p>
-        </div>
+        <div className="px-2"><h2 className="text-sm font-black uppercase tracking-widest text-slate-500">Assignment Pool</h2></div>
         {TIERS_MENU.map((tier) => (
             <div key={tier.id} className={`rounded-2xl border ${tier.border} ${tier.bg} overflow-hidden`}>
                 <div className="px-4 py-3 border-b border-inherit bg-black/20 flex justify-between items-center"><span className={`text-xs font-black uppercase tracking-widest ${tier.color}`}>{tier.label}</span></div>
                 <div className="p-1 grid grid-cols-1 gap-1">
-                    {Object.keys(PLAYER_DB).filter((pid) => PLAYER_DB[pid].tier === tier.id).map((pid) => {
-                        const player = PLAYER_DB[pid];
-                        const isInjured = injuredPlayers.includes(pid);
-                        return (
-                            <div 
-                                key={pid} 
-                                className={`w-full px-3 py-2 rounded-lg transition-colors flex items-center justify-between text-left ${isInjured ? 'bg-red-950/30 border border-red-900/50 opacity-50 grayscale' : 'bg-transparent'}`}
-                            >
-                                <div className="flex items-center gap-3">
-                                    <div className="w-8 h-8 rounded-full bg-slate-800 border border-slate-600 flex flex-col items-center justify-center relative">
-                                        {isInjured ? <Stethoscope size={14} className="text-red-500" /> : (
-                                            <span className="text-[9px] font-black leading-none text-slate-300">{player.name.split(' ').map((n: string) => n[0]).join('').substring(0,2)}</span>
-                                        )}
-                                    </div>
-                                    <div>
-                                        <div className={`text-xs font-bold ${isInjured ? 'text-slate-500 line-through' : getTierColor(player.tier)}`}>{player.name}</div>
-                                        <div className="text-[9px] font-black uppercase tracking-wider text-slate-500">#{player.num} • {player.team} • {player.pos} {isInjured && '(OUT)'}</div>
-                                    </div>
-                                </div>
-                                {isInjured && <Ban size={16} className="text-red-500 opacity-50" />}
+                    {Object.keys(PLAYER_DB).filter((pid) => PLAYER_DB[pid].tier === tier.id).map((pid) => (
+                        <div key={pid} className={`w-full px-3 py-2 rounded-lg flex items-center justify-between text-left bg-transparent`}>
+                            <div className="flex items-center gap-3">
+                                <div className="w-8 h-8 rounded-full bg-slate-800 border border-slate-600 flex flex-col items-center justify-center"><span className="text-[9px] font-black leading-none text-slate-300">{PLAYER_DB[pid].name.substring(0,2)}</span></div>
+                                <div><div className={`text-xs font-bold ${getTierColor(PLAYER_DB[pid].tier)}`}>{PLAYER_DB[pid].name}</div><div className="text-[9px] font-black uppercase tracking-wider text-slate-500">#{PLAYER_DB[pid].num} • {PLAYER_DB[pid].team} • {PLAYER_DB[pid].pos}</div></div>
                             </div>
-                        );
-                    })}
+                        </div>
+                    ))}
                 </div>
             </div>
         ))}
     </div>
   );
 
+  const renderLogContent = () => {
+    const displayPlays = [...globalPlays].reverse();
+
+    return (
+        <div className="space-y-4 animate-in slide-in-from-right-4 duration-300">
+            <div className="flex items-center justify-between px-2">
+                <h2 className="text-sm font-black uppercase tracking-widest text-slate-500">Play-by-Play</h2>
+                <span className="text-[10px] font-bold text-green-500 animate-pulse">● Live</span>
+            </div>
+            
+            <div className="space-y-3">
+                {displayPlays.length > 0 ? displayPlays.map((play, i) => {
+                    const playId = `play_${String((globalPlays.length - 1) - i).padStart(3, '0')}`;
+                    
+                    const playText = play.play?.toLowerCase() || "";
+                    const isNullPlay = playText.includes("kick") || playText.includes("punt") || playText.includes("field goal") || playText.includes("touchback") || playText.includes("timeout") || playText.includes("end");
+                    
+                    // --- NULL PLAYS STILL SHOW (GRAY) ---
+                    // if (isNullPlay) return null; // Removed
+
+                    const leagueResult = leagueLogs[playId]; 
+                    const stats = play.playerStats || {};
+                    const playerId = Object.keys(stats)[0];
+                    const ownerName = findOwnerName(playerId); 
+                    
+                    let statusLabel = "PROCESSING...";
+                    let statusColor = "text-slate-600 animate-pulse";
+                    let cardBorder = "border-slate-800 dashed";
+                    let cardBg = "bg-slate-900"; 
+                    
+                    if (leagueResult) {
+                        if (leagueResult.type === 'burn') {
+                            statusLabel = `${leagueResult.message}`; // "JOHN SMITH BURNED"
+                            statusColor = "text-red-500";
+                            cardBorder = "border-red-500/50";
+                            cardBg = "bg-red-950/10";
+                        } else if (leagueResult.type === 'score') {
+                            statusLabel = `${leagueResult.message}`; // "JOHN SMITH +7"
+                            statusColor = "text-green-400";
+                            cardBorder = "border-green-500/50";
+                            cardBg = "bg-green-950/10";
+                        } else if (leagueResult.type === 'neutral') {
+                            statusLabel = "GAME UPDATE";
+                            statusColor = "text-slate-600";
+                            cardBorder = "border-slate-800";
+                        }
+                    } else if (ownerName) {
+                        // NOW isGameFlow IS DEFINED
+                        // But wait, isGameFlow is not defined in this scope.
+                        // Re-use isNullPlay logic
+                        if (!isNullPlay) {
+                            statusLabel = `${ownerName} +1`;
+                            statusColor = "text-orange-400"; 
+                            cardBorder = "border-slate-700";
+                        } else {
+                            statusLabel = "GAME UPDATE";
+                            statusColor = "text-slate-600";
+                            cardBorder = "border-slate-800";
+                        }
+                    } else if (isNullPlay) {
+                        statusLabel = "GAME UPDATE";
+                        statusColor = "text-slate-600";
+                        cardBorder = "border-slate-800";
+                    }
+
+                    return (
+                        <div key={playId} className={`rounded-xl border ${cardBorder} ${cardBg} p-3 transition-all`}>
+                            <div className="flex justify-between items-center mb-2">
+                                <span className="text-[9px] font-bold text-slate-600 uppercase tracking-widest">
+                                    {play.playPeriod} {play.playClock}
+                                </span>
+                                <div className={`text-[9px] font-black uppercase tracking-widest ${statusColor} flex items-center gap-1.5`}>
+                                    {leagueResult?.type === 'burn' && <Flame size={10} fill="currentColor" />}
+                                    {statusLabel}
+                                </div>
+                            </div>
+                            <p className="text-xs font-bold text-slate-300 leading-relaxed">
+                                {play.play}
+                            </p>
+                        </div>
+                    );
+                }) : <div className="p-6 text-center text-slate-500 text-xs">Waiting for plays...</div>}
+            </div>
+        </div>
+    );
+  };
+
   return (
     <div className="min-h-screen bg-[#020617] text-white font-sans">
         <div className="sticky top-0 z-50 bg-[#020617]/95 backdrop-blur-xl border-b border-orange-500/20 shadow-lg shadow-orange-500/5">
             <div className="max-w-7xl mx-auto px-4 md:px-8 h-14 flex items-center justify-between">
-                <div className="flex items-center gap-3"><button onClick={() => router.push('/hub')} className="p-1.5 text-slate-400 hover:text-white transition-colors rounded-full hover:bg-white/5"><ChevronLeft size={20} /></button>
-                    <div className="flex items-center gap-1.5 text-orange-500 text-[9px] font-black uppercase tracking-widest mb-0.5"><Flame size={10} fill="currentColor" /> Pass The Pigskin</div>
-                </div>
-                <div className="flex flex-col items-end"><span className="text-[8px] font-bold uppercase tracking-widest text-orange-400">Pot</span><span className="text-sm font-black text-white tabular-nums">$0.00</span></div>
+                <div className="flex items-center gap-3"><button onClick={() => router.push('/hub')} className="p-1.5 text-slate-400 hover:text-white transition-colors rounded-full hover:bg-white/5"><ChevronLeft size={20} /></button><div className="flex items-center gap-1.5 text-orange-500 text-[9px] font-black uppercase tracking-widest mb-0.5"><Flame size={10} fill="currentColor" /> Pass The Pigskin</div></div>
             </div>
-            
             <div className="px-4 pb-4 md:px-8 flex flex-col md:flex-row items-center md:items-end justify-between gap-3">
-                <div className="flex-1">
-                    <h1 className="text-xl md:text-3xl font-black italic uppercase tracking-tighter text-white leading-none break-words max-w-4xl text-center md:text-left">{leagueData.name}</h1>
-                    <div className="hidden md:flex items-center gap-4 mt-2">
-                        <button 
-                            onClick={() => setActiveTab('game')}
-                            className={`text-[10px] font-black uppercase tracking-widest transition-colors ${activeTab !== 'info' ? 'text-orange-500' : 'text-slate-500 hover:text-white'}`}
-                        >
-                            Game Arena
-                        </button>
-                        <button 
-                            onClick={() => setActiveTab('info')}
-                            className={`text-[10px] font-black uppercase tracking-widest transition-colors ${activeTab === 'info' ? 'text-orange-500' : 'text-slate-500 hover:text-white'}`}
-                        >
-                            League Info
-                        </button>
-                    </div>
-                </div>
-                
-                <Link 
-                    href="/how-to-play" 
-                    className="flex items-center gap-2 text-orange-500 hover:text-white transition-colors pb-1 group cursor-pointer"
-                >
-                    <span className="text-[10px] font-black uppercase tracking-widest underline decoration-orange-500/30 underline-offset-4 group-hover:decoration-white transition-all">How to Play</span>
-                    <Play size={14} fill="currentColor" />
-                </Link>
+                <div className="flex-1"><h1 className="text-xl md:text-3xl font-black italic uppercase tracking-tighter text-white leading-none break-words max-w-4xl text-center md:text-left">{leagueData.name}</h1><div className="hidden md:flex items-center gap-4 mt-2"><button onClick={() => setActiveTab('game')} className={`text-[10px] font-black uppercase tracking-widest transition-colors ${activeTab === 'game' ? 'text-orange-500' : 'text-slate-500 hover:text-white'}`}>Game Arena</button><button onClick={() => setActiveTab('info')} className={`text-[10px] font-black uppercase tracking-widest transition-colors ${activeTab === 'info' ? 'text-orange-500' : 'text-slate-500 hover:text-white'}`}>League Info</button></div></div>
+                <div className="hidden md:block"><Link href="/how-to-play" className="flex items-center gap-2 text-orange-500 hover:text-white transition-colors pb-1 group cursor-pointer"><span className="text-[10px] font-black uppercase tracking-widest underline decoration-orange-500/30 underline-offset-4 group-hover:decoration-white transition-all">How to Play</span><Play size={14} fill="currentColor" /></Link></div>
             </div>
-
-            <div className="md:hidden max-w-2xl mx-auto px-4 pb-2">
-                <div className="flex bg-slate-900/50 p-1 rounded-xl border border-slate-800">
-                    <button onClick={() => setActiveTab('game')} className={`flex-1 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${activeTab === 'game' ? 'bg-orange-500 text-[#020617] shadow-lg' : 'text-slate-500 hover:text-white'}`}>
-                        {/* CHANGED ICON AND TEXT HERE */}
-                        <Trophy size={14} /> Scoreboard
-                    </button>
-                    <button onClick={() => setActiveTab('log')} className={`flex-1 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${activeTab === 'log' ? 'bg-orange-500 text-[#020617] shadow-lg' : 'text-slate-500 hover:text-white'}`}><ScrollText size={14} /> Log</button>
-                    <button onClick={() => setActiveTab('tiers')} className={`flex-1 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${activeTab === 'tiers' ? 'bg-orange-500 text-[#020617] shadow-lg' : 'text-slate-500 hover:text-white'}`}><Layers size={14} /> Tiers</button>
-                    <button onClick={() => setActiveTab('info')} className={`flex-1 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${activeTab === 'info' ? 'bg-orange-500 text-[#020617] shadow-lg' : 'text-slate-500 hover:text-white'}`}><Info size={14} /></button>
-                </div>
-            </div>
+            <div className="md:hidden max-w-2xl mx-auto px-4 pb-2"><div className="flex bg-slate-900/50 p-1 rounded-xl border border-slate-800"><button onClick={() => setActiveTab('game')} className={`flex-1 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${activeTab === 'game' ? 'bg-orange-500 text-[#020617] shadow-lg' : 'text-slate-500 hover:text-white'}`}><Gamepad2 size={14} /> Scoreboard</button><button onClick={() => setActiveTab('log')} className={`flex-1 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${activeTab === 'log' ? 'bg-orange-500 text-[#020617] shadow-lg' : 'text-slate-500 hover:text-white'}`}><ScrollText size={14} /> Log</button><button onClick={() => setActiveTab('tiers')} className={`flex-1 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${activeTab === 'tiers' ? 'bg-orange-500 text-[#020617] shadow-lg' : 'text-slate-500 hover:text-white'}`}><Layers size={14} /> Tiers</button><button onClick={() => setActiveTab('info')} className={`flex-1 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${activeTab === 'info' ? 'bg-orange-500 text-[#020617] shadow-lg' : 'text-slate-500 hover:text-white'}`}><Info size={14} /></button></div></div>
         </div>
-        
         <main className="max-w-[1400px] mx-auto px-4 py-6">
             <div className="md:hidden">
                 {activeTab === 'game' && renderGameContent()}
@@ -416,11 +426,8 @@ export default function PigskinView({ leagueData }: PigskinViewProps) {
                 {activeTab === 'tiers' && renderTiersContent()}
                 {activeTab === 'info' && renderInfoContent()}
             </div>
-
             <div className="hidden md:block">
-                {activeTab === 'info' ? (
-                    renderInfoContent()
-                ) : (
+                {activeTab === 'info' ? renderInfoContent() : (
                     <div className="grid grid-cols-12 gap-8">
                         <div className="col-span-3 border-r border-slate-800/50 pr-6">{renderTiersContent()}</div>
                         <div className="col-span-6">{renderGameContent()}</div>
