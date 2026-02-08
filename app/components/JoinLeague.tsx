@@ -2,8 +2,8 @@
 
 export const dynamic = 'force-dynamic';
 
-import { useState, useEffect, useRef } from 'react'; // Added useEffect and useRef
-import { useRouter, useSearchParams } from 'next/navigation'; // Added useSearchParams
+import { useState, useEffect, useRef } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { joinLeagueAction } from '@/app/actions/joinLeague';
 import { auth } from '@/lib/firebase';
 import { Loader2, Lock, ArrowRight } from 'lucide-react';
@@ -14,10 +14,9 @@ export default function JoinLeague() {
   const [status, setStatus] = useState<'IDLE' | 'LOADING' | 'PASSWORD_NEEDED' | 'ERROR'>('IDLE');
   const [errorMsg, setErrorMsg] = useState('');
   const router = useRouter();
-  const searchParams = useSearchParams(); // Surgical addition
-  const hasAutoJoined = useRef(false); // Prevents loops
+  const searchParams = useSearchParams();
+  const hasAutoJoined = useRef(false);
 
-  // 🛠️ Modified to allow an "auto-passed" code from the URL
   const handleJoin = async (overrideCode?: string) => {
     const user = auth.currentUser;
     const finalCode = overrideCode || code;
@@ -28,15 +27,21 @@ export default function JoinLeague() {
     setErrorMsg('');
 
     try {
+        // 🛠️ Ensure your action now returns the leagueId on success
         const result = await joinLeagueAction(user.uid, finalCode, password, user.displayName || 'Member');
 
         if (result.success) {
             setCode('');
             setPassword('');
             setStatus('IDLE');
-            // Surgical addition: Clear the URL and refresh
-            router.replace('/hub');
-            router.refresh(); 
+            
+            // 🚀 SURGICAL ADDITION: Redirect directly to the league page
+            if (result.leagueId) {
+                router.push(`/league/${result.leagueId}`);
+            } else {
+                router.replace('/hub');
+                router.refresh(); 
+            }
         } else if (result.status === 'PASSWORD_REQUIRED') {
             setStatus('PASSWORD_NEEDED');
         } else {
@@ -51,7 +56,6 @@ export default function JoinLeague() {
     }
   };
 
-  // --- 🛠️ NEW: AUTO-LISTEN FOR SHARE LINKS ---
   useEffect(() => {
     const urlCode = searchParams.get('join');
     if (urlCode && !hasAutoJoined.current) {
@@ -59,7 +63,6 @@ export default function JoinLeague() {
       const upperCode = urlCode.toUpperCase();
       setCode(upperCode);
       
-      // Give Auth a second to wake up, then try joining
       const unsubscribe = auth.onAuthStateChanged((user) => {
         if (user) {
           handleJoin(upperCode);

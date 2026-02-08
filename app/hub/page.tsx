@@ -34,7 +34,7 @@ export default function Hub() {
 
   // --- SELECTION STATE ---
   const [activeSport, setActiveSport] = useState<SportType>('NFL');
-  const [activeMode, setActiveMode] = useState<GameMode>('plague');
+  const [activeMode, setActiveMode] = useState<GameMode>('pigskin');
 
   // --- MODAL STATE ---
   const [showCreateModal, setShowCreateModal] = useState(false);
