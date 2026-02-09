@@ -31,7 +31,7 @@ const PLAYER_DB: Record<string, any> = {
     '2977187': { name: 'Cooper Kupp', team: 'SEA', pos: 'WR', num: 10, tier: 2 },
     '4426514': { name: 'George Holani', team: 'SEA', pos: 'RB', num: 28, tier: 2 },
     '3912547': { name: 'Sam Darnold', team: 'SEA', pos: 'QB', num: 14, tier: 3 }, 
-    '4431611': { name: 'AJ Barner', team: 'SEA', pos: 'TE', num: 88, tier: 3 },
+    '4576297': { name: 'AJ Barner', team: 'SEA', pos: 'TE', num: 88, tier: 3 },
     '4684940': { name: 'Rashid Shaheed', team: 'SEA', pos: 'WR', num: 22, tier: 3 }, // Added Shaheed
 };
 
