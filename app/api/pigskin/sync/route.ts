@@ -2,38 +2,54 @@
 import { db } from '@/lib/firebaseAdmin'; 
 import { FieldValue } from 'firebase-admin/firestore';
 
-const GAME_ID = "20260208_NE@SEA";
-
 export const maxDuration = 60; 
 export const dynamic = 'force-dynamic';
 
-// --- CONFIGURATION: SHAHEED & KICKERS INCLUDED ---
+// --- 1. ROSTER CONFIGURATION ---
 const TIERS: Record<number, string[]> = {
     // TIER 1: Stars
-    1: ['4431452', '4569173', '4567048', '4431566'],
+    1: ['4431452', '4569173', '4567048', '4431566'], // Maye, Stevenson, Walker, JSN
     // TIER 2: Starters
-    2: ['2976212', '3046439', '5000001', '2977187', '4426514'],
+    2: ['2976212', '3046439', '5000001', '2977187', '4426514'], // Diggs, Henry, Henderson, Kupp, Holani
     // TIER 3: Role Players & Special Teams
     3: [
-        '4241478', '4431526', '3052876', '4431611', '3912547',
-        '4684940' // Rashid Shaheed (SEA - WR)
+        '4241478', // Gibson
+        '4431526', // Boutte
+        '3052876', // Hollins
+        '3931390', // Slye (K)
+        '4431611', // Barner (ID 1)
+        '4576297', // Barner (ID 2 - API Variation)
+        '2473037', // Myers (K)
+        '3912547', // Darnold
+        '4684940'  // Shaheed
     ] 
+};
+
+// --- 2. NAME FALLBACK MAP ---
+const ID_TO_NAME: Record<string, string> = {
+    '4431452': 'Maye',
+    '4569173': 'Stevenson',
+    '2976212': 'Diggs',
+    '3046439': 'Henry',
+    '5000001': 'Henderson',
+    '4241478': 'Gibson',
+    '4431526': 'Boutte',
+    '3052876': 'Hollins',
+    '4567048': 'Walker',
+    '4431566': 'Smith-Njigba', 
+    '2977187': 'Kupp',
+    '3912547': 'Darnold',
+    '4426514': 'Holani',
+    '4431611': 'Barner',
+    '4576297': 'Barner',
+    '4684940': 'Shaheed'
 };
 
 export async function GET() {
   try {
-    // SINGLE-SHOT SYNC: No more loop.
-    // One ping from the script = One check of the database.
     console.log("🔄 Sync Triggered...");
-
     await performSync();
-
-    return NextResponse.json({ 
-        success: true, 
-        message: "Sync processing complete",
-        timestamp: new Date().toISOString()
-    });
-
+    return NextResponse.json({ success: true, message: "Sync complete" });
   } catch (error: any) {
     console.error("Sync Error:", error);
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
@@ -41,18 +57,10 @@ export async function GET() {
 }
 
 async function performSync() {
-    console.log(`🔄 [${new Date().toISOString()}] processing sync logic...`);
-    const feedRef = db.collection('system').doc('live_feed');
-    const injuriesRef = db.collection('system').doc('pigskin_injuries');
-    const leaguesRef = db.collection('leagues');
-
-    // ✅ FIXED SYNTAX:
-    // The variables are declared ONCE on the left.
-    // The promises are listed on the right WITHOUT any "=" signs.
     const [feedDoc, injuriesDoc, leaguesSnap] = await Promise.all([
-        feedRef.get(),
-        injuriesRef.get(),
-        leaguesRef.get()
+        db.collection('system').doc('live_feed').get(),
+        db.collection('system').doc('pigskin_injuries').get(),
+        db.collection('leagues').get()
     ]);
 
     const feed = feedDoc.data();
@@ -64,23 +72,21 @@ async function performSync() {
     const batch = db.batch();
     let batchCount = 0;
 
-    // Now leaguesSnap.docs can be safely iterated
     for (const leagueDoc of leaguesSnap.docs) {
-        const leagueId = leagueDoc.id;
         const leagueData = leagueDoc.data();
-        let lastIndex = typeof leagueData.lastPlayIndex === 'number' ? leagueData.lastPlayIndex : -1;
+        if (leagueData.gameMode !== 'pigskin') continue;
 
+        let lastIndex = typeof leagueData.lastPlayIndex === 'number' ? leagueData.lastPlayIndex : -1;
         if (lastIndex >= allPlays.length) {
              batch.update(leagueDoc.ref, { lastPlayIndex: -1 });
              lastIndex = -1;
         }
 
         const startIndex = lastIndex + 1;
-        if (startIndex >= allPlays.length) continue;
+        if (startIndex >= allPlays.length) continue; 
 
-        const membersRef = leaguesRef.doc(leagueId).collection('Members');
-        const membersSnap = await membersRef.get();
-        
+        // Fetch Members
+        const membersSnap = await db.collection('leagues').doc(leagueDoc.id).collection('Members').get();
         let members: any[] = membersSnap.docs.map(d => ({ id: d.id, ref: d.ref, ...d.data() }))
             .sort((a: any, b: any) => (parseInt(a.queueOrder) || 999) - (parseInt(b.queueOrder) || 999));
 
@@ -98,30 +104,44 @@ async function performSync() {
             const holder = members[0]; 
             if (!holder) continue;
 
-            const currentLineup = (Array.isArray(holder.lineup) && holder.lineup.length > 0) ? holder.lineup[holder.lineup.length - 1] : (holder.lineup || {});
+            const currentLineup = (Array.isArray(holder.lineup) && holder.lineup.length > 0) 
+                ? holder.lineup[holder.lineup.length - 1] 
+                : (holder.lineup || {});
+            
             const myPlayerIds: string[] = currentLineup.players || [];
 
-            // --- KICKING DATA DETECTION ---
-            // If any involved player has a "Kicking" stats block, it's a special teams play
+            // --- A. KICKER / SPECIAL TEAMS CHECK ---
             const involvesKicking = Object.values(playerStats).some((stats: any) => stats && stats.Kicking);
 
+            // --- B. NULL PLAY CHECK ---
             const isNullPlay = 
                 involvesKicking || 
                 lowerDesc.includes('timeout') || 
                 lowerDesc.includes('end quarter') || 
                 lowerDesc.includes('end game') || 
-                lowerDesc.includes('touchback');
+                lowerDesc.includes('touchback') ||
+                lowerDesc.includes('spike');
 
+            // --- C. HOLDER INVOLVEMENT (Updated) ---
             let holderInvolved = false;
+
             if (!isNullPlay) {
                 for (const myPid of myPlayerIds) {
+                    // 1. Direct ID Match
                     if (playerStats[myPid]) {
+                        holderInvolved = true;
+                        break;
+                    }
+                    // 2. Name Fallback (For Incompletes)
+                    const pName = ID_TO_NAME[myPid];
+                    if (pName && lowerDesc.includes(pName.toLowerCase())) {
                         holderInvolved = true;
                         break;
                     }
                 }
             }
 
+            // --- D. SCORING ---
             let pointsToAdd = 0;
             let logType = "info";
             let logMessage = "Game Event"; 
@@ -136,7 +156,7 @@ async function performSync() {
                 if (lowerDesc.includes('touchdown')) {
                     pointsToAdd = 7;
                     logType = "score";
-                    logMessage = `${holder.username} +7`;
+                    logMessage = `${holder.username} +7 (TD)`;
                     shouldRotate = false; 
                 } else {
                     pointsToAdd = 0;
@@ -151,7 +171,8 @@ async function performSync() {
                 logMessage = `${holder.username} +1`;
             }
 
-            const logRef = leaguesRef.doc(leagueId).collection('ActivityLogs').doc(playId);
+            // --- E. BATCH OPERATIONS ---
+            const logRef = db.collection('leagues').doc(leagueDoc.id).collection('ActivityLogs').doc(playId);
             batch.set(logRef, {
                 message: logMessage,
                 type: logType,
@@ -182,7 +203,9 @@ async function performSync() {
                 if (newOnDeck) {
                     const p1 = TIERS[1].filter(id => !injuries.includes(id)).sort(() => 0.5 - Math.random())[0];
                     const p2 = TIERS[2].filter(id => !injuries.includes(id)).sort(() => 0.5 - Math.random())[0];
-                    const p3 = TIERS[3].filter(id => !injuries.includes(id)).sort(() => 0.5 - Math.random())[0];
+                    // Fallback for Tier 3
+                    let p3 = TIERS[3].filter(id => !injuries.includes(id)).sort(() => 0.5 - Math.random())[0];
+                    if (!p3 && TIERS[3].length > 0) p3 = TIERS[3][0]; 
 
                     if (p1 && p2 && p3) {
                         const newHand = [{ turn: Date.now().toString(), players: [p1, p2, p3] }];
@@ -192,12 +215,13 @@ async function performSync() {
                 }
             }
         }
+        
         batch.update(leagueDoc.ref, { lastPlayIndex: newLastIndex });
         batchCount++;
     }
 
     if (batchCount > 0) {
-        await batch.commit(); // Committed in a single atomic batch
-        console.log(`   ✅ Committed ${batchCount} updates.`);
+        await batch.commit();
+        console.log(`✅ Sync: Committed ${batchCount} updates.`);
     }
 }

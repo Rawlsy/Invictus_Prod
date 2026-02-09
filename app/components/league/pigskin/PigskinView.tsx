@@ -1,9 +1,9 @@
 ﻿'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect } from 'react';
 import { collection, onSnapshot, query, orderBy, limit, doc } from 'firebase/firestore'; 
 import { db } from '@/lib/firebase'; 
-import { ChevronLeft, Trophy, Layers, ScrollText, Users, Flame, Play, Info, Check, Globe, Lock, AlertTriangle, Gamepad2, Clock, Ban, Stethoscope } from 'lucide-react';
+import { ChevronLeft, Trophy, Layers, ScrollText, Users, Flame, Play, Info, Check, Lock, Gamepad2, Ban, Stethoscope } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 
@@ -13,8 +13,9 @@ interface PigskinViewProps {
     leagueData: any;
 }
 
-// --- CONFIG: SHAHEED ADDED TO TIER 3 ---
+// --- CONFIGURATION: ALL PLAYERS REGISTERED ---
 const PLAYER_DB: Record<string, any> = {
+    // PATRIOTS
     '4431452': { name: 'Drake Maye', team: 'NE', pos: 'QB', num: 10, tier: 1 },
     '4569173': { name: 'Rhamondre Stevenson', team: 'NE', pos: 'RB', num: 38, tier: 1 },
     '2976212': { name: 'Stefon Diggs', team: 'NE', pos: 'WR', num: 14, tier: 2 },
@@ -23,13 +24,15 @@ const PLAYER_DB: Record<string, any> = {
     '4241478': { name: 'Antonio Gibson', team: 'NE', pos: 'RB', num: 4, tier: 3 },
     '4431526': { name: 'Kayshon Boutte', team: 'NE', pos: 'WR', num: 80, tier: 3 },
     '3052876': { name: 'Mack Hollins', team: 'NE', pos: 'WR', num: 13, tier: 3 },
+
+    // SEAHAWKS
     '4567048': { name: 'Kenneth Walker III', team: 'SEA', pos: 'RB', num: 9, tier: 1 },
     '4431566': { name: 'Jaxon Smith-Njigba', team: 'SEA', pos: 'WR', num: 11, tier: 1 },
-    '3912547': { name: 'Sam Darnold', team: 'SEA', pos: 'QB', num: 14, tier: 3 }, 
     '2977187': { name: 'Cooper Kupp', team: 'SEA', pos: 'WR', num: 10, tier: 2 },
     '4426514': { name: 'George Holani', team: 'SEA', pos: 'RB', num: 28, tier: 2 },
+    '3912547': { name: 'Sam Darnold', team: 'SEA', pos: 'QB', num: 14, tier: 3 }, 
     '4431611': { name: 'AJ Barner', team: 'SEA', pos: 'TE', num: 88, tier: 3 },
-    '4684940': { name: 'Rashid Shaheed', team: 'SEA', pos: 'WR', num: 22, tier: 3 },
+    '4684940': { name: 'Rashid Shaheed', team: 'SEA', pos: 'WR', num: 22, tier: 3 }, // Added Shaheed
 };
 
 const TIERS_MENU = [
@@ -41,11 +44,11 @@ const TIERS_MENU = [
 export default function PigskinView({ leagueData }: PigskinViewProps) {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<'game' | 'log' | 'tiers' | 'info'>('game');
-   
+    
   const [members, setMembers] = useState<any[]>([]);
   const [globalPlays, setGlobalPlays] = useState<any[]>([]); 
   const [leagueLogs, setLeagueLogs] = useState<Record<string, any>>({}); 
-   
+    
   const [injuredPlayers, setInjuredPlayers] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [copied, setCopied] = useState(false);
@@ -70,9 +73,8 @@ export default function PigskinView({ leagueData }: PigskinViewProps) {
     return () => unsubscribe();
   }, [leagueData?.id]);
 
-// --- GLOBAL FEED ---
-useEffect(() => {
-    // interval removed - logic now driven by gameday-pinger.js
+  // --- GLOBAL FEED ---
+  useEffect(() => {
     const feedRef = doc(db, 'system', 'live_feed');
     const unsubscribe = onSnapshot(feedRef, (docSnap) => {
         if (docSnap.exists()) {
@@ -83,9 +85,8 @@ useEffect(() => {
             }
         }
     });
-
     return () => unsubscribe();
-}, []);
+  }, []);
 
   // --- LEAGUE LOGS ---
   useEffect(() => {
@@ -116,35 +117,7 @@ useEffect(() => {
     return () => unsubscribe();
   }, []);
 
-  // --- SCORE CALCULATOR ---
-  const { homeScore, awayScore } = useMemo(() => {
-    let home = 0;
-    let away = 0;
-
-    globalPlays.forEach(play => {
-        const text = (play.play || "").toLowerCase();
-        const stats = play.playerStats || {};
-        const pid = Object.keys(stats)[0]; 
-        const player = PLAYER_DB[pid];
-
-        if (!player) return; 
-
-        let points = 0;
-        if (text.includes("touchdown")) points = 6; 
-        else if (text.includes("field goal") && text.includes("good")) points = 3;
-        else if (text.includes("extra point") && text.includes("good")) points = 1;
-        else if (text.includes("safety")) points = 2;
-
-        if (points > 0) {
-            if (player.team === 'NE') home += points;
-            else if (player.team === 'SEA') away += points;
-        }
-    });
-
-    return { homeScore: home, awayScore: away };
-  }, [globalPlays]);
-
-
+  // --- HELPERS ---
   const copyLeagueCode = () => {
     if (leagueData?.joinCode) {
         navigator.clipboard.writeText(leagueData.joinCode);
@@ -183,7 +156,8 @@ useEffect(() => {
       return owner ? owner.username : null;
   };
 
-const renderInfoContent = () => {
+  // --- RENDER CONTENT ---
+  const renderInfoContent = () => {
     const leagueUrl = `https://invictussports.app/join/${leagueData?.joinCode}`;
 
     const handleShare = async () => {
@@ -217,7 +191,7 @@ const renderInfoContent = () => {
                 </div>
             </div>
 
-            {/* Access Keys & Password */}
+            {/* Access Keys */}
             <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl">
                 <div className="bg-slate-800/50 p-4 border-b border-slate-700 flex items-center justify-between">
                     <h2 className="text-sm font-black uppercase tracking-widest text-white flex items-center gap-2">
@@ -261,37 +235,53 @@ const renderInfoContent = () => {
             </Link>
         </div>
     );
-}; //test
+  };
 
   const renderGameContent = () => (
     <div className="space-y-4 animate-in fade-in duration-300">
+        {/* Scoreboard Card */}
         <div className="bg-gradient-to-r from-orange-600 to-red-600 rounded-2xl p-0.5 shadow-lg">
             <div className="bg-[#0f0a05] rounded-[0.9rem] p-4 flex flex-col md:flex-row items-center justify-between gap-4 relative overflow-hidden">
                 <div className="absolute inset-0 bg-gradient-to-br from-orange-900/20 to-transparent"></div>
                 <div className="relative z-10 flex items-center gap-3">
                     <Trophy className="text-orange-500" size={24} />
-                    <div><h2 className="text-lg font-black uppercase italic tracking-tighter text-white">Super Bowl LX</h2><p className="text-orange-200/60 text-[10px] font-bold leading-tight">NE vs SEA</p></div>
+                    <div>
+                        <h2 className="text-lg font-black uppercase italic tracking-tighter text-white">Super Bowl LX</h2>
+                        <p className="text-orange-200/60 text-[10px] font-bold leading-tight">NE vs SEA</p>
+                    </div>
                 </div>
+                
+                {/* 🚀 UPDATED: Read Score & Clock directly from Firestore */}
                 {gameFeed ? (
                     <div className="relative z-10 flex items-center gap-4 bg-black/40 p-2 rounded-lg border border-white/10">
                         <div className="text-center">
-                            <div className="text-2xl font-black text-white leading-none">{awayScore}</div>
+                            <div className="text-2xl font-black text-white leading-none">{gameFeed.awayScore ?? 0}</div>
                             <div className="text-[9px] font-bold text-slate-400 uppercase">SEA</div>
                         </div>
                         <div className="text-xs font-black text-orange-500">VS</div>
                         <div className="text-center">
-                            <div className="text-2xl font-black text-white leading-none">{homeScore}</div>
+                            <div className="text-2xl font-black text-white leading-none">{gameFeed.homeScore ?? 0}</div>
                             <div className="text-[9px] font-bold text-slate-400 uppercase">NE</div>
                         </div>
                         <div className="h-8 w-px bg-white/10 mx-1"></div>
-                        <div className="flex flex-col items-center min-w-[50px]"><div className="text-sm font-mono font-bold text-green-400 flex items-center gap-1">{gameFeed.clock || "00:00"}</div><div className="text-[9px] font-bold text-slate-400 uppercase">{gameFeed.period || "PRE"}</div></div>
+                        <div className="flex flex-col items-center min-w-[50px]">
+                            <div className="text-sm font-mono font-bold text-green-400 flex items-center gap-1">
+                                {gameFeed.clock || "00:00"}
+                            </div>
+                            <div className="text-[9px] font-bold text-slate-400 uppercase">
+                                {gameFeed.period || "PRE"}
+                            </div>
+                        </div>
                     </div>
                 ) : (
-                    <div className="relative z-10 text-[10px] font-bold text-slate-500 uppercase tracking-widest bg-black/20 px-3 py-1 rounded-full">Waiting for kickoff...</div>
+                    <div className="relative z-10 text-[10px] font-bold text-slate-500 uppercase tracking-widest bg-black/20 px-3 py-1 rounded-full">
+                        Waiting for kickoff...
+                    </div>
                 )}
             </div>
         </div>
 
+        {/* Members List */}
         <div className="space-y-3">
             {members.map((member, index) => {
                 const isPigskinHolder = index === 0;
