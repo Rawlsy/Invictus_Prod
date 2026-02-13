@@ -1,159 +1,143 @@
-import { NextResponse } from 'next/server';
-import { collection, getDocs, doc, writeBatch, getDoc } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+﻿import { NextResponse } from 'next/server';
+import { db } from '@/lib/firebaseAdmin';
 
 export const dynamic = 'force-dynamic';
 
-const ROUND_TO_DB_MAP: Record<string, string> = {
-  "Wild Card Lineup": "WildCard",
-  "Divisional Lineup": "Divisional",
-  "Conference Lineup": "Conference",
-  "Super Bowl Lineup": "Superbowl"
-};
-
-const SCORING_KEYS: Record<string, string> = {
-    "PPR": "PPR",
-    "Half-PPR": "Half",
-    "Standard": "Standard"
+// Helper to normalize names for matching (removes suffixes, punctuation, case)
+const normalizeName = (name: string) => {
+    if (!name) return '';
+    return name.toLowerCase()
+        .replace(/[^a-z0-9 ]/g, '') // Remove punctuation (Smith-Njigba -> smithnjigba)
+        .replace(/\b(jr|sr|ii|iii|iv)\b/g, '') // Remove suffixes
+        .trim();
 };
 
 export async function GET(request: Request) {
-  const logs: string[] = []; // Log collector
-  
   try {
     const { searchParams } = new URL(request.url);
-    const secret = searchParams.get('secret');
-    const specificLeagueId = searchParams.get('leagueId');
-
-    if (secret !== 'Touchdown2026') return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-
-    logs.push("Starting Update Process...");
-
-    // 1. Get Leagues
-    let leaguesToCheck = [];
-    if (specificLeagueId) {
-        const leagueDoc = await getDoc(doc(db, 'leagues', specificLeagueId));
-        if (leagueDoc.exists()) {
-            leaguesToCheck.push({ id: leagueDoc.id, ...leagueDoc.data() });
-            logs.push(`Found specific league: ${leagueDoc.id}`);
-        } else {
-            logs.push(`League ID ${specificLeagueId} not found.`);
-        }
-    } else {
-        const leaguesSnap = await getDocs(collection(db, 'leagues'));
-        leaguesToCheck = leaguesSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-        logs.push(`Found ${leaguesToCheck.length} leagues total.`);
+    if (searchParams.get('secret') !== 'Touchdown2026') {
+        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const batch = writeBatch(db);
+    const log: string[] = [];
+    log.push("Starting Score Update (Dynamic Name Matching)...");
+
+    // 1. FETCH ALL PLAYERS & BUILD INDICES
+    const playersSnap = await db.collection('players').get();
+    
+    const playerMap: Record<string, any> = {};      // Lookup by ID
+    const nameMap: Record<string, any[]> = {};      // Lookup by Name (Array to handle dupes)
+
+    playersSnap.forEach(doc => {
+        const data = doc.data();
+        const pid = doc.id;
+        
+        // Store by ID
+        playerMap[pid] = { ...data, id: pid };
+
+        // Store by Normalized Name (Index for fallback)
+        if (data.name) {
+            const clean = normalizeName(data.name);
+            if (!nameMap[clean]) nameMap[clean] = [];
+            nameMap[clean].push(playerMap[pid]);
+        }
+    });
+
+    log.push(`Loaded ${Object.keys(playerMap).length} players.`);
+
+    // 2. FETCH LEAGUES
+    const leaguesSnap = await db.collection('leagues').get();
+    const batch = db.batch();
     let updateCount = 0;
 
-    // 2. Iterate Leagues
-    for (const league of leaguesToCheck) {
-        const leagueId = league.id;
-        // @ts-ignore
-        let scoringType = league.scoringType || league.settings?.scoringType || "PPR";
-        if (scoringType === "Half PPR") scoringType = "Half-PPR";
-        
-        const scoreKey = SCORING_KEYS[scoringType] || "PPR";
-        logs.push(`Processing League ${leagueId} (Format: ${scoringType} -> Key: ${scoreKey})`);
+    for (const leagueDoc of leaguesSnap.docs) {
+        const leagueData = leagueDoc.data();
+        if (leagueData.gameMode === 'pigskin') continue;
 
-        // 3. Fetch Members
-        const membersRef = collection(db, 'leagues', leagueId, 'Members');
-        const membersSnap = await getDocs(membersRef);
-        logs.push(`-> Found ${membersSnap.size} members.`);
+        // Determine Format based on 'scoringType' (Priority) or 'scoringFormat'
+        const rawType = (leagueData.scoringType || leagueData.scoringFormat || leagueData.format || '').toLowerCase();
+        let formatKey = 'Standard';
+        if (rawType.includes('half')) formatKey = 'Half';       
+        else if (rawType.includes('ppr')) formatKey = 'PPR';
 
+        // Fetch Members
+        const membersSnap = await db.collection('leagues').doc(leagueDoc.id).collection('Members').get();
         if (membersSnap.empty) continue;
 
-        // 4. Gather Player IDs
-        const allPlayerIds = new Set<string>();
-        const memberDataMap: any[] = [];
+        for (const memberDoc of membersSnap.docs) {
+            const memberData = memberDoc.data();
+            const rawLineup = memberData['Super Bowl Lineup'] || memberData.lineup; 
+            let playerIds: string[] = [];
 
-        membersSnap.docs.forEach(docSnap => {
-            const data = docSnap.data();
-            memberDataMap.push({ id: docSnap.id, ref: docSnap.ref, data });
-            
-            // Log the keys found in the first member to debug structure
-            if (memberDataMap.length === 1) {
-                logs.push(`-> Sample Member Keys: ${Object.keys(data).join(', ')}`);
+            // Lineup Parsing
+            if (rawLineup) {
+                if (Array.isArray(rawLineup)) {
+                    if (typeof rawLineup[0] === 'string') playerIds = rawLineup;
+                    else if (rawLineup[0]?.players) playerIds = rawLineup[rawLineup.length-1].players; 
+                }
+                else if (Array.isArray(rawLineup.players)) playerIds = rawLineup.players;
+                else if (typeof rawLineup === 'object') playerIds = Object.values(rawLineup).filter(val => typeof val === 'string') as string[];
             }
 
-            Object.keys(ROUND_TO_DB_MAP).forEach(roundKey => {
-                if (data[roundKey]) {
-                    const lineupSize = Object.keys(data[roundKey]).length;
-                    if (lineupSize > 0) {
-                        // logs.push(`--> Found ${lineupSize} players in ${roundKey} for ${docSnap.id}`);
-                        Object.values(data[roundKey]).forEach((pid: any) => {
-                            if (typeof pid === 'string' && pid) allPlayerIds.add(pid);
-                        });
+            if (!playerIds || playerIds.length === 0) continue;
+
+            // CALCULATE TOTAL SCORE
+            let totalScore = 0;
+            
+            playerIds.forEach(originalPid => {
+                let pStats = playerMap[originalPid];
+                let roundStats = null;
+
+                // CHECK 1: Direct ID Match
+                if (pStats) {
+                    roundStats = pStats.Superbowl || pStats['Week 22'] || pStats.SuperBowl;
+                }
+
+                // CHECK 2: Name Fallback (The "Long Term Fix")
+                // If direct match failed OR direct match has no stats for this round...
+                if (!roundStats && pStats && pStats.name) {
+                    const clean = normalizeName(pStats.name);
+                    const candidates = nameMap[clean] || [];
+
+                    // Find any matching player that DOES have stats
+                    const bestMatch = candidates.find(c => c.Superbowl || c['Week 22'] || c.SuperBowl);
+                    
+                    if (bestMatch) {
+                        // console.log(`[Healed] Found stats for ${pStats.name} via alias ID: ${bestMatch.id}`);
+                        roundStats = bestMatch.Superbowl || bestMatch['Week 22'] || bestMatch.SuperBowl;
                     }
                 }
-            });
-        });
 
-        logs.push(`-> Unique Players collected from all lineups: ${allPlayerIds.size}`);
-
-        if (allPlayerIds.size === 0) {
-            logs.push(`-> No players found in any lineup. Skipping calculation.`);
-            continue;
-        }
-
-        // 5. Fetch Player Stats (Optimized: Fetch entire players collection for simplicity if < 500 docs, else chunk)
-        // Since we likely have < 500 active players, fetching all is safer/easier than chunking 'in' queries.
-        const playersRef = collection(db, 'players');
-        const playersSnap = await getDocs(playersRef); 
-        const playersMap: Record<string, any> = {};
-        playersSnap.docs.forEach(p => { playersMap[p.id] = p.data(); });
-        
-        logs.push(`-> Loaded ${playersSnap.size} player stats records from DB.`);
-
-        // 6. Calculate Scores
-        for (const member of memberDataMap) {
-            const scores: Record<string, number> = { Total: 0 };
-            
-            Object.entries(ROUND_TO_DB_MAP).forEach(([lineupKey, statKey]) => {
-                const lineup = member.data[lineupKey] || {};
-                let roundTotal = 0;
-
-                Object.values(lineup).forEach((pid: any) => {
-                    if (typeof pid === 'string' && playersMap[pid]) {
-                        const pData = playersMap[pid];
-                        // Access nested round stats: e.g. player['WildCard']['PPR']
-                        const roundStats = pData[statKey]; 
-                        if (roundStats) {
-                            const points = Number(roundStats[scoreKey] || 0);
-                            roundTotal += points;
-                        }
-                    }
-                });
-
-                scores[statKey] = Number(roundTotal.toFixed(2));
-                scores.Total += roundTotal;
+                // ADD POINTS
+                if (roundStats) {
+                    const score = roundStats[formatKey] || 0;
+                    totalScore += score;
+                }
             });
 
-            scores.Total = Number(scores.Total.toFixed(2));
+            totalScore = Math.round(totalScore * 100) / 100;
 
-            // Queue Update
-            batch.update(member.ref, { scores });
+            // UPDATE DB
+            const memberRef = db.collection('leagues').doc(leagueDoc.id).collection('Members').doc(memberDoc.id);
+            batch.update(memberRef, {
+                [`scores.Superbowl`]: totalScore,
+                [`scores.Week22`]: totalScore,
+                [`scores.Total`]: totalScore
+            });
             updateCount++;
         }
     }
 
     if (updateCount > 0) {
         await batch.commit();
-        logs.push(`Committed updates for ${updateCount} members.`);
-    } else {
-        logs.push("No updates committed.");
     }
 
-    return NextResponse.json({ 
-        success: true, 
-        updatedMembers: updateCount, 
-        logs: logs 
-    });
+    log.push(`✅ Updated scores for ${updateCount} members.`);
+
+    return NextResponse.json({ success: true, updated: updateCount, logs: log });
 
   } catch (error: any) {
-    console.error("Error updating member scores:", error);
-    return NextResponse.json({ error: error.message, logs }, { status: 500 });
+    console.error("[Update-Scores] Error:", error);
+    return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }

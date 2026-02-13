@@ -1,6 +1,6 @@
 ﻿import { NextResponse } from 'next/server';
-import { doc, writeBatch } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+// REMOVE THIS LINE: import { doc, writeBatch } from 'firebase/firestore';
+import { db } from '@/lib/firebaseAdmin'; 
 
 export const dynamic = 'force-dynamic';
 
@@ -20,14 +20,14 @@ const SCORING_RULES = {
 const DST_ID_MAP: Record<string, string> = {
     "ARI": "ARI", "ATL": "ATL", "BAL": "BAL", "BUF": "BUF", "CAR": "CAR",
     "CHI": "CHI", "CIN": "CIN", "CLE": "CLE", "DAL": "DAL", "DEN": "DEN",
-    "DET": "DET", "GB": "GB",   "HOU": "HOU", "IND": "IND", "JAX": "JAX",
-    "KC": "KC",   "LV": "LV",   "LAC": "LAC", "LAR": "LAR", "MIA": "MIA",
-    "MIN": "MIN", "NE": "NE",   "NO": "NO",   "NYG": "NYG", "NYJ": "NYJ",
-    "PHI": "PHI", "PIT": "PIT", "SEA": "SEA", "SF": "SF",   "TB": "TB",
+    "DET": "DET", "GB": "GB",    "HOU": "HOU", "IND": "IND", "JAX": "JAX",
+    "KC": "KC",    "LV": "LV",    "LAC": "LAC", "LAR": "LAR", "MIA": "MIA",
+    "MIN": "MIN", "NE": "NE",    "NO": "NO",    "NYG": "NYG", "NYJ": "NYJ",
+    "PHI": "PHI", "PIT": "PIT", "SEA": "SEA", "SF": "SF",    "TB": "TB",
     "TEN": "TEN", "WAS": "WAS", "WSH": "WAS" 
 };
 
-// Points Allowed Tiers
+// ... (Keep your clean helper functions exactly the same) ...
 const getPointsAllowedScore = (pa: number | null) => {
   if (pa === null) return 0; 
   if (pa === 0) return 15;        
@@ -54,7 +54,6 @@ const cleanNullable = (val: any) => {
     return clean(val);
 };
 
-// --- HELPER: FIND 2PT IN STATS OBJECTS ---
 const get2PtFromStats = (obj: any) => {
     if (!obj) return 0;
     return clean(obj.twoPointConversions) || 
@@ -64,18 +63,15 @@ const get2PtFromStats = (obj: any) => {
            clean(obj.twoPointMade);
 };
 
-// --- HELPER: FIND 2PT IN SCORING PLAYS (TEXT PARSING) ---
-// Returns 1 if the player ID likely scored a 2PT conversion in the text summary
 const checkScoringPlaysFor2Pt = (scoringPlays: any[], player: any) => {
     if (!scoringPlays || !Array.isArray(scoringPlays)) return 0;
     
     let foundCount = 0;
     const pName = player.longName || `${player.firstName} ${player.lastName}`;
-    const pNameShort = `${player.firstName?.charAt(0)}.${player.lastName}`; // e.g. "C.Loveland"
+    const pNameShort = `${player.firstName?.charAt(0)}.${player.lastName}`; 
 
     scoringPlays.forEach(play => {
         const desc = (play.scoreDetails || play.description || "").toLowerCase();
-        // Look for "2pt" or "two point" AND the player's name
         if ((desc.includes('2pt') || desc.includes('two point')) && desc.includes('conversion')) {
              if (desc.includes(pName.toLowerCase()) || desc.includes(pNameShort.toLowerCase())) {
                  console.log(`[2PT FOUND IN TEXT] for ${pName}: ${desc}`);
@@ -113,7 +109,8 @@ export async function GET(request: Request) {
 
     if (games.length === 0) return NextResponse.json({ message: "No games found." });
 
-    const batch = writeBatch(db);
+    // --- FIX: USE ADMIN SDK BATCH ---
+    const batch = db.batch(); 
     let updateCount = 0;
 
     for (const game of games) {
@@ -128,7 +125,7 @@ export async function GET(request: Request) {
       const playerStats = boxData.body?.playerStats || {};
       const dstStats = boxData.body?.DST || {};
       const teamStatsRaw = boxData.body?.teamStats || {};
-      const scoringPlays = boxData.body?.scoringPlays || []; // Grab scoring plays
+      const scoringPlays = boxData.body?.scoringPlays || []; 
 
       // --- A. OFFENSE PLAYERS ---
       Object.values(playerStats).forEach((player: any) => {
@@ -151,17 +148,13 @@ export async function GET(request: Request) {
         const RecTD = clean(player.Receiving?.recTD || player.receiving?.recTD);
         const Fumbles = clean(player.Defense?.fumblesLost) + clean(player.Rushing?.fumblesLost) + clean(player.Receiving?.fumblesLost);
         
-        // --- 2PT FIX: CHECK STATS + CHECK TEXT SUMMARY ---
         let TwoPt = get2PtFromStats(player.Passing || player.passing) + 
                     get2PtFromStats(player.Rushing || player.rushing) + 
                     get2PtFromStats(player.Receiving || player.receiving) +
                     get2PtFromStats(player.Scoring || player.scoring);
 
-        if (TwoPt === 0) {
-            TwoPt = get2PtFromStats(player); // Check root
-        }
+        if (TwoPt === 0) TwoPt = get2PtFromStats(player);
         
-        // Fallback: Check Scoring Plays Text
         if (TwoPt === 0) {
             const text2Pt = checkScoringPlaysFor2Pt(scoringPlays, player);
             if (text2Pt > 0) TwoPt = text2Pt;
@@ -186,7 +179,8 @@ export async function GET(request: Request) {
 
         let opponent = team === homeTeam ? `vs ${awayTeam}` : `@ ${homeTeam}`;
 
-        const playerRef = doc(db, 'players', player.playerID);
+        // --- FIX: ADMIN SDK DOC REFERENCE ---
+        const playerRef = db.collection('players').doc(player.playerID);
         
         batch.set(playerRef, {
           name, team, position: pos, 
@@ -252,7 +246,8 @@ export async function GET(request: Request) {
         const YdsAllowed = clean(stats.ydsAllowed || stats.YdsAllowed);
         const PtsAllowedDisplay = PtsAllowed === null ? 0 : PtsAllowed;
 
-        const dstRef = doc(db, 'players', docID); 
+        // --- FIX: ADMIN SDK DOC REFERENCE ---
+        const dstRef = db.collection('players').doc(docID); 
         
         batch.set(dstRef, {
             name: `${realAbv} Defense`, position: 'DEF', team: realAbv,
